@@ -1,0 +1,6 @@
+fastapi==0.115.12
+uvicorn==0.34.0
+
+# Optional hardware extras (install on the device only):
+# python-periphery   -> live SPI/GPIO breath board
+# pyserial           -> NMEA serial GPS module

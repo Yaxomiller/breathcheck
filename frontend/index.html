@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>BreathCheck</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="dim"></div>
+
+<header class="topbar">
+  <button id="btn-back" class="top-back hidden" aria-label="Back">
+    <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <div class="top-title" id="top-title">BREATHCHECK</div>
+  <div class="top-clock" id="top-clock">--:--</div>
+</header>
+
+<main id="main">
+
+  <!-- ============ HOME ============ -->
+  <section id="screen-home" class="screen active">
+    <div class="home-clock">
+      <div class="home-time" id="home-time">--:--</div>
+      <div class="home-date" id="home-date">&nbsp;</div>
+    </div>
+    <div class="tiles">
+      <button class="tile tile-scan" data-nav="scan">
+        <svg viewBox="0 0 48 48"><circle cx="19" cy="24" r="9" fill="none" stroke="currentColor" stroke-width="3"/><path d="M31 16c4 0 7 2 9 4M31 24h11M31 32c4 0 7-2 9-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span>SCAN</span>
+      </button>
+      <button class="tile" data-nav="database">
+        <svg viewBox="0 0 48 48"><ellipse cx="24" cy="12" rx="14" ry="5.5" fill="none" stroke="currentColor" stroke-width="3"/><path d="M10 12v24c0 3 6.3 5.5 14 5.5S38 39 38 36V12M10 24c0 3 6.3 5.5 14 5.5S38 27 38 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span>DATABASE</span>
+      </button>
+      <button class="tile" data-nav="gps">
+        <svg viewBox="0 0 48 48"><path d="M24 5c-7.2 0-13 5.6-13 12.5C11 27 24 43 24 43s13-16 13-25.5C37 10.6 31.2 5 24 5z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><circle cx="24" cy="17.5" r="4.5" fill="none" stroke="currentColor" stroke-width="3"/></svg>
+        <span>GPS</span>
+      </button>
+      <button class="tile" data-nav="settings">
+        <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="3"/><path d="M24 4v7M24 37v7M4 24h7M37 24h7M9.9 9.9l4.9 4.9M33.2 33.2l4.9 4.9M38.1 9.9l-4.9 4.9M14.8 33.2l-4.9 4.9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span>SETTINGS</span>
+      </button>
+    </div>
+    <div class="home-status">
+      <span class="chip" id="chip-set">SET --</span>
+      <span class="chip" id="chip-records">0 RECORDS</span>
+      <span class="chip" id="chip-sensor">SENSOR</span>
+    </div>
+  </section>
+
+  <!-- ============ SCAN ============ -->
+  <section id="screen-scan" class="screen">
+
+    <!-- stage: ready -->
+    <div id="scan-ready" class="scan-stage">
+      <div class="cam-wrap">
+        <video id="cam" autoplay playsinline muted></video>
+        <div id="cam-off" class="cam-off hidden">
+          <svg viewBox="0 0 48 48"><rect x="6" y="12" width="26" height="24" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><path d="M32 20l10-6v20l-10-6M8 8l32 32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+          <span>NO CAMERA</span>
+        </div>
+      </div>
+      <div class="scan-hint">READY &mdash; ASK SUBJECT TO BLOW</div>
+      <button id="btn-start-scan" class="btn-huge">START</button>
+    </div>
+
+    <!-- stage: countdown -->
+    <div id="scan-run" class="scan-stage hidden">
+      <div class="run-layout">
+        <div class="ring-wrap">
+          <svg class="ring" viewBox="0 0 220 220">
+            <circle class="ring-bg" cx="110" cy="110" r="96"/>
+            <circle class="ring-fg" id="ring-fg" cx="110" cy="110" r="96"/>
+          </svg>
+          <div class="ring-center">
+            <div id="ring-count" class="ring-count">10</div>
+            <div class="ring-label" id="ring-label">BLOW</div>
+          </div>
+        </div>
+        <div class="cam-wrap cam-small">
+          <video id="cam2" autoplay playsinline muted></video>
+          <div id="flash" class="flash"></div>
+          <div id="photo-tag" class="photo-tag hidden">PHOTO ✓</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- stage: analyzing -->
+    <div id="scan-wait" class="scan-stage hidden">
+      <div class="spinner"></div>
+      <div class="scan-hint">ANALYZING&hellip;</div>
+    </div>
+
+    <!-- stage: results -->
+    <div id="scan-result" class="scan-stage hidden">
+      <div id="verdict" class="verdict">PASS</div>
+      <div class="result-cards">
+        <div class="result-card" id="card-alcohol">
+          <div class="rc-name">ALCOHOL</div>
+          <div class="rc-value"><span id="val-alcohol">0.0</span><small>mg/100ml</small></div>
+          <div class="rc-flag" id="flag-alcohol">PASS</div>
+        </div>
+        <div class="result-card" id="card-cannabis">
+          <div class="rc-name">CANNABIS</div>
+          <div class="rc-value"><span id="val-cannabis">0</span><small>ADC</small></div>
+          <div class="rc-flag" id="flag-cannabis">PASS</div>
+        </div>
+      </div>
+      <div class="row-buttons">
+        <button id="btn-rescan" class="btn-secondary">RESCAN</button>
+        <button id="btn-to-form" class="btn-primary">NEXT &rarr;</button>
+      </div>
+    </div>
+
+    <!-- stage: error -->
+    <div id="scan-error" class="scan-stage hidden">
+      <div class="verdict bad">SENSOR ERROR</div>
+      <div class="scan-hint" id="scan-error-msg"></div>
+      <button id="btn-retry" class="btn-huge">RETRY</button>
+    </div>
+  </section>
+
+  <!-- ============ FORM ============ -->
+  <section id="screen-form" class="screen">
+    <div class="form-scroll">
+      <div class="auto-panel">
+        <div class="auto-grid" id="auto-grid"></div>
+        <div class="auto-photo">
+          <img id="form-photo" alt="" class="hidden">
+          <div id="form-nophoto" class="nophoto">NO PHOTO</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label class="field req"><span>NAME</span><input id="f-name" autocomplete="off"></label>
+        <label class="field"><span>DL NO</span><input id="f-dl" autocomplete="off"></label>
+        <label class="field"><span>VEHICLE NO</span><input id="f-vehicle" autocomplete="off"></label>
+        <label class="field"><span>MOBILE NO</span><input id="f-mobile" inputmode="tel" autocomplete="off"></label>
+        <label class="field"><span>TEST LOCATION</span><input id="f-location" autocomplete="off"></label>
+        <label class="field"><span>OFFICER</span><input id="f-officer" autocomplete="off"></label>
+        <label class="field field-wide"><span>ADDRESS</span><input id="f-address" autocomplete="off"></label>
+      </div>
+    </div>
+    <div class="row-buttons form-actions">
+      <button id="btn-form-cancel" class="btn-secondary">CANCEL</button>
+      <button id="btn-form-save" class="btn-primary">SAVE</button>
+    </div>
+  </section>
+
+  <!-- ============ SAVED ============ -->
+  <section id="screen-saved" class="screen">
+    <div class="saved-check">
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="3"/><path d="M14 25l7 7 13-15" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="saved-title">SAVED</div>
+    <div class="saved-receipt" id="saved-receipt">R000000-0000</div>
+    <div class="row-buttons">
+      <button id="btn-print" class="btn-secondary">PRINT</button>
+      <button id="btn-done" class="btn-primary">DONE</button>
+    </div>
+  </section>
+
+  <!-- ============ DATABASE ============ -->
+  <section id="screen-database" class="screen">
+    <div class="db-toolbar">
+      <input id="db-search" placeholder="SEARCH NAME / DL / VEHICLE" autocomplete="off">
+    </div>
+    <div class="db-table-wrap">
+      <table class="db-table">
+        <thead><tr><th>NAME</th><th>DL NO</th><th>ALCOHOL</th><th>CANNABIS</th></tr></thead>
+        <tbody id="db-body"></tbody>
+      </table>
+      <div id="db-empty" class="db-empty hidden">NO RECORDS</div>
+    </div>
+  </section>
+
+  <!-- ============ GPS ============ -->
+  <section id="screen-gps" class="screen">
+    <div class="gps-card">
+      <div id="gps-fix" class="gps-fix">NO FIX</div>
+      <div class="gps-coords">
+        <div class="gps-row"><span>LAT</span><b id="gps-lat">--</b></div>
+        <div class="gps-row"><span>LON</span><b id="gps-lon">--</b></div>
+      </div>
+      <div class="gps-meta">
+        <span id="gps-sats">0 SAT</span>
+        <span id="gps-time">--:--:--</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="screen-settings" class="screen">
+    <div class="settings-scroll">
+
+      <div class="set-group">
+        <div class="set-title">TIME &amp; DATE</div>
+        <div class="set-row"><span>NOW</span><b id="set-now">--</b></div>
+        <div class="set-row">
+          <input type="datetime-local" id="set-datetime">
+          <button id="btn-set-time" class="btn-small">SET</button>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">DISPLAY</div>
+        <div class="set-row"><span>BRIGHTNESS</span>
+          <input type="range" id="set-brightness" min="10" max="100" step="5">
+          <b id="set-brightness-val">80%</b>
+        </div>
+        <div class="set-row"><span>SOUND</span>
+          <button id="set-sound" class="toggle">ON</button>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">LIMITS</div>
+        <div class="set-row"><span>ALCOHOL</span><input type="number" id="set-alimit" min="0" step="1"><em>mg/100ml</em></div>
+        <div class="set-row"><span>CANNABIS</span><input type="number" id="set-climit" min="0" step="1"><em>ADC</em></div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">TEST</div>
+        <div class="set-row"><span>SCAN TIME</span><input type="number" id="set-scansec" min="3" max="60" step="1"><em>sec</em></div>
+        <div class="set-row"><span>PHOTO AT</span><input type="number" id="set-photosec" min="1" max="59" step="1"><em>sec</em></div>
+        <div class="set-row"><span>MODE</span><button id="set-mode" class="toggle">ACTIVE</button></div>
+        <div class="set-row"><span>OFFICER</span><input type="text" id="set-officer" autocomplete="off"></div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">DEVICE</div>
+        <div class="set-row"><span>AREA</span><input type="text" id="set-area" autocomplete="off"></div>
+        <div class="set-row"><span>SET NO</span><input type="text" id="set-setno" autocomplete="off"></div>
+        <div class="set-row"><span>CALIBR DATE</span><input type="date" id="set-calibr"></div>
+        <div class="set-row"><span>VERSION</span><b id="set-version">--</b></div>
+        <div class="set-row"><span>COUNTER</span><b id="set-counter">0</b></div>
+        <div class="set-row"><span>SENSOR</span><b id="set-sensor">--</b></div>
+        <div class="set-row"><span>GPS</span><b id="set-gps">--</b></div>
+      </div>
+
+      <div class="set-group">
+        <div class="set-title">DATA</div>
+        <div class="set-row"><span>RECORDS</span><b id="set-records">0</b></div>
+        <div class="set-row">
+          <button id="btn-export" class="btn-small">EXPORT CSV</button>
+          <button id="btn-erase" class="btn-small danger">ERASE ALL</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</main>
+
+<!-- record detail overlay -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <b id="modal-title">RECORD</b>
+      <button id="modal-close" class="modal-x">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- print receipt (visible only when printing) -->
+<div id="print-receipt"></div>
+
+<canvas id="snap" class="hidden"></canvas>
+<script src="app.js"></script>
+</body>
+</html>
