@@ -20,13 +20,14 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import logging
 import threading
 import time
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,6 +37,18 @@ from src import config, db, device
 from src.gps import GpsProvider
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
+logger = logging.getLogger("breathcheck.scan")
+
+
+@app.middleware("http")
+async def prevent_stale_frontend(request: Request, call_next):
+    """The kiosk must not retain an old scan state machine after an update."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 _analyzer = analyzer_module.resolve_analyzer()
 _gps = GpsProvider()
@@ -182,6 +195,7 @@ def _run_scan(session_id: str, measure_seconds: float) -> None:
             },
         }
     except Exception as exc:
+        logger.exception("Scan %s failed", session_id)
         update = {"status": "error", "error": str(exc)}
     with _sessions_lock:
         if session_id in _sessions:

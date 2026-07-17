@@ -14,9 +14,10 @@ Measurement cycle, timed in the STM32 tick domain (immune to host latency):
             integral over the window for BOTH sensors, reported in mV*s
             (the AL-05P datasheet specs linearity as the INTEGRAL of output);
             peak deltas tracked too
-  SHUTDOWN  AFE sampling + PID off, pump off. The alcohol cell idles
-            VIRTUALLY SHORTED (LP loop stays biased at 0 V) — a 2-lead fuel
-            cell must be stored shorted or it polarizes and drifts.
+  IDLE      PID + pump off. Alcohol AFE sampling stays on so the real board,
+            whose deployed firmware has no idle SYS keepalive, continues to
+            provide doorbell frames that can carry the next START command.
+            The alcohol cell remains virtually shorted at 0 V.
 
 Sources:  1 = AD7798 (PID / cannabis, ADC codes, 19.073 uV/LSB)
           2 = AD5941 (alcohol fuel cell, nA; V = I * Rtia at Rtia = 4k)
@@ -276,9 +277,11 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             except Exception:
                 pass
             finally:
-                # Stop sampling; the LP loop keeps the cell biased (virtual short).
+                # Keep AFE sampling alive between tests. The deployed board
+                # does not emit the documented SYS keepalive while both
+                # channels are off; shutting AFE down here leaves no doorbell
+                # frame on which the next START command can be delivered.
                 try:
-                    self._send_commands([CMD_AFE_SHUTDOWN])
                     self.pump.write(False)
                 except Exception:
                     pass
@@ -309,7 +312,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     progress("starting", 0.0, 0.0)
                 self.pump.write(True)   # active high
                 if not self._send_commands([CMD_PID_STARTUP, CMD_AFE_STARTUP]):
-                    raise RuntimeError("sensor board did not acknowledge startup commands")
+                    raise RuntimeError("sensor board produced no frame for startup commands")
 
                 # Command delivery can legitimately take a few seconds while
                 # the board wakes. Do not charge that time to the measurement
@@ -358,9 +361,10 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         if progress:
                             progress(phase, elapsed, total)
             finally:
-                # Sensors off first (needs live frames), then pump.
+                # Shut down the PID lamp, but deliberately leave AFE sampling
+                # on so its doorbell frames can carry the next PID START.
                 try:
-                    self._send_commands([CMD_AFE_SHUTDOWN, CMD_PID_SHUTDOWN])
+                    self._send_commands([CMD_PID_SHUTDOWN])
                 except Exception:
                     pass
                 try:

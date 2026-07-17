@@ -77,13 +77,15 @@ GPIO 271 active-high) → **5 s fresh-air baseline** → **10 s blow**. Per-samp
 delta = value − baseline; the reported reading for BOTH channels is the
 **trapezoidal integral of the delta in mV·s** (the AL-05P datasheet specs
 linearity as the integral of output), with peak deltas stored alongside
-(alcohol peak in µA, cannabis peak in mV). After the cycle, sensors are shut
-down and the alcohol cell idles virtually shorted (biased at 0 V) — a 2-lead
-fuel cell must be stored shorted or it polarizes and drifts.
+(alcohol peak in µA, cannabis peak in mV). After the cycle, the PID and pump
+shut down while alcohol AFE sampling remains on so its doorbell frames can
+carry the next START command. The alcohol cell still idles virtually shorted
+(biased at 0 V) — a 2-lead fuel cell must be stored shorted or it polarizes
+and drifts.
 
 At app start the backend runs a **stabilize pass** (pump off, PID off, AFE
-sampling on) until the alcohol baseline drift stays under 30 nA/s, then stops
-sampling with the cell still biased. The home screen shows SENSOR WARM-UP
+sampling on) until the alcohol baseline drift stays under 30 nA/s, then leaves
+AFE sampling on with the cell still biased. The home screen shows SENSOR WARM-UP
 during this; scans are rejected with a friendly message until it finishes.
 
 **Readings are uncalibrated mV·s integrals** — the PASS/FAIL limits in
