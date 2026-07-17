@@ -118,7 +118,7 @@ def _mvs(src: int, integ_raw_ms: float) -> float:
 class BreathAnalyzer:
     name = "base"
     startup_warnings: tuple[str, ...] = ()
-    state = "ready"   # ready | stabilizing | measuring | error
+    state = "ready"   # ready | stabilizing | measuring | finishing | error
     stream_ok = True  # False while the doorbell/frame stream is dead
 
     def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
@@ -460,6 +460,11 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         if progress:
                             progress(phase, elapsed, total)
             finally:
+                # The test itself is over; the PID-off handshake below can
+                # take seconds (lamp shutdown makes the STM32 busy). Expose
+                # "finishing" so scan screens don't read it as a live test —
+                # a new scan started now simply queues behind this lock.
+                self.state = "finishing"
                 # Shut down the PID lamp, but deliberately leave AFE sampling
                 # on so its doorbell frames can carry the next PID START.
                 try:
