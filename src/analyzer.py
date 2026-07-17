@@ -44,6 +44,7 @@ purge handles the pump-airflow step from a settled starting point.
 from __future__ import annotations
 
 import importlib
+import logging
 import random
 import struct
 import threading
@@ -52,6 +53,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from src import config
+
+logger = logging.getLogger("breathcheck.analyzer")
 
 CMD_NONE = 0x00
 CMD_PID_STARTUP = 0xA0
@@ -241,10 +244,18 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         if error is None:
             self._last_frame_at = time.monotonic()
             self.stream_ok = True
-        deadline = time.monotonic() + 1.0
-        while not self.ready.read():   # let the STM32 deassert
+        # Let the STM32 deassert. PID lamp startup keeps the STM32 busy well
+        # past a second, so a slow deassert after a VALID frame must not fail
+        # the exchange — the command was already latched. The bound exists
+        # only so a wedged board cannot hang the thread forever.
+        deadline = time.monotonic() + config.DOORBELL_TIMEOUT_SECONDS
+        while not self.ready.read():
             if time.monotonic() >= deadline:
-                return None, False     # wedged low — do not spin forever
+                if error is None:
+                    logger.warning("doorbell still asserted %.1fs after a valid frame",
+                                   config.DOORBELL_TIMEOUT_SECONDS)
+                    break
+                return None, False
             time.sleep(0.001)
         if error:
             return None, False
@@ -261,6 +272,8 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 if delivered:
                     break
             else:
+                logger.warning("command 0x%02X not delivered after %d frames",
+                               command, max_tries)
                 return False
         return True
 
@@ -291,9 +304,13 @@ class SpiBreathAnalyzer(BreathAnalyzer):
     def _recover_stream(self) -> None:
         """Reset a silent board and restart AFE sampling in the background,
         so the next scan starts on a live doorbell instead of failing."""
+        logger.warning("frame stream dead for %.0fs — resetting sensor board",
+                       config.STREAM_DEAD_SECONDS)
         self._reset_board()
         self.stream_ok = self._send_commands(
             [CMD_PID_SHUTDOWN, CMD_AFE_STARTUP], max_tries=8, timeout=0.5)
+        logger.warning("sensor board recovery %s",
+                       "succeeded" if self.stream_ok else "FAILED")
         self._last_frame_at = time.monotonic()
 
     # ---- stabilize (app-start priming) -----------------------------------
@@ -388,6 +405,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 startup_commands = [CMD_PID_STARTUP, CMD_AFE_STARTUP]
                 if not self._send_commands(startup_commands, max_tries=3):
                     # Recover a board whose frame stream stopped unexpectedly.
+                    logger.warning("scan startup commands undelivered — hardware reset mid-scan")
                     if progress:
                         progress("recovering", 0.0, 0.0)
                     self._reset_board()

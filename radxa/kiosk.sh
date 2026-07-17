@@ -43,8 +43,10 @@ fi
 
 # --use-fake-ui-for-media-stream auto-grants the camera permission so the
 # exhale photo works unattended (no permission popup on a kiosk).
+# --incognito: never serve a stale cached frontend after an app update.
 exec "$BROWSER" \
   --kiosk "$URL" \
+  --incognito \
   --noerrdialogs \
   --disable-infobars \
   --disable-session-crashed-bubble \
