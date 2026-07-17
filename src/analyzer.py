@@ -65,7 +65,8 @@ PID_MV_PER_LSB = 2.5 / (2 * 65536) * 1000.0   # 0.019073 mV
 BASELINE_SPREAD_WARN = {SRC_AD5941: 200,   # nA
                         SRC_AD7798: 300}   # codes (PID drifts during warm-up)
 
-# progress(phase, elapsed_seconds, total_seconds); phase: purge|baseline|measure
+# progress(phase, elapsed_seconds, total_seconds);
+# phase: starting|purge|baseline|measure
 ProgressFn = Callable[[str, float, float], None]
 
 
@@ -174,6 +175,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             "Readings are uncalibrated integrals (mV*s) — set limits after calibration.",
         )
         self.last_stabilize: dict[str, Any] = {}
+        self.stabilize_started_at: Optional[float] = None
 
         # Open once; the board stays powered between cycles so the STM32
         # keeps its boot-time zero-offset calibration. "high" = atomic
@@ -218,24 +220,26 @@ class SpiBreathAnalyzer(BreathAnalyzer):
 
     def _send_commands(self, commands: list[int], max_tries: int = 15) -> bool:
         """Deliver each command on its own frame, retrying on frame errors.
-        Gives up after max_tries frames so a dead link can't hang teardown."""
-        pending = list(commands)
-        tries = 0
-        while pending and tries < max_tries:
-            tries += 1
-            _records, delivered = self._wait_frame(pending[0])
-            if delivered:
-                pending.pop(0)
-        return not pending
+        Each command gets its own retry budget: a slow PID start must not use
+        all the attempts before the alcohol AFE start command is sent."""
+        for command in commands:
+            for _attempt in range(max_tries):
+                _records, delivered = self._wait_frame(command)
+                if delivered:
+                    break
+            else:
+                return False
+        return True
 
     # ---- stabilize (app-start priming) -----------------------------------
 
     def stabilize(self) -> None:
         with self._lock:
             self.state = "stabilizing"
+            self.stabilize_started_at = time.time()
             samples: list[tuple[int, int]] = []   # (stm32_ms, nA)
             settled = False
-            started = time.time()
+            started = self.stabilize_started_at
             try:
                 self.pump.write(False)   # priming happens in still air
                 self._send_commands([CMD_PID_SHUTDOWN, CMD_AFE_STARTUP])
@@ -283,6 +287,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     "final_ua": round(samples[-1][1] / 1000.0, 3) if samples else None,
                     "elapsed_s": round(time.time() - started, 1),
                 }
+                self.stabilize_started_at = None
                 self.state = "ready"
 
     # ---- measurement cycle ------------------------------------------------
@@ -299,10 +304,20 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                          "peak": 0.0, "peak_t": 0, "prev": None, "stable": True}
                      for s in (SRC_AD7798, SRC_AD5941)}
             t0: Optional[int] = None   # STM32 tick of first AD5941 sample
-            wall_deadline = time.monotonic() + total_ms / 1000.0 + 30.0
             try:
+                if progress:
+                    progress("starting", 0.0, 0.0)
                 self.pump.write(True)   # active high
-                self._send_commands([CMD_PID_STARTUP, CMD_AFE_STARTUP])
+                if not self._send_commands([CMD_PID_STARTUP, CMD_AFE_STARTUP]):
+                    raise RuntimeError("sensor board did not acknowledge startup commands")
+
+                # Command delivery can legitimately take a few seconds while
+                # the board wakes. Do not charge that time to the measurement
+                # deadline or the first scan can fail after partially starting
+                # the sensor, only for an immediate retry to work.
+                wall_deadline = time.monotonic() + total_ms / 1000.0 + 30.0
+                if progress:
+                    progress("purge", 0.0, purge_ms / 1000.0)
 
                 while True:
                     if time.monotonic() > wall_deadline:

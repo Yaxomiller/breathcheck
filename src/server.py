@@ -43,6 +43,10 @@ _gps = GpsProvider()
 # Prime the alcohol cell once at app start (SPI board only): AFE sampling on,
 # wait for the baseline drift to settle, leave the cell biased.
 if _analyzer.name == "spi":
+    # Set this before starting the thread so an immediate scan request cannot
+    # slip through while the stabilization worker is waiting to be scheduled.
+    _analyzer.state = "stabilizing"
+    _analyzer.stabilize_started_at = time.time()
     threading.Thread(target=_analyzer.stabilize, daemon=True).start()
 
 _sessions: dict[str, dict[str, Any]] = {}
@@ -107,6 +111,13 @@ class TimeIn(BaseModel):
 def status() -> dict[str, Any]:
     now = datetime.now()
     settings = db.get_settings()
+    stabilize = dict(getattr(_analyzer, "last_stabilize", {}))
+    stabilize_started_at = getattr(_analyzer, "stabilize_started_at", None)
+    if _analyzer.state == "stabilizing" and stabilize_started_at is not None:
+        stabilize.update({
+            "elapsed_s": round(max(0.0, time.time() - stabilize_started_at), 1),
+            "max_s": config.STABILIZE_MAX_S,
+        })
     return {
         "app": config.APP_NAME,
         "version": config.APP_VERSION,
@@ -119,7 +130,9 @@ def status() -> dict[str, Any]:
         "counter": int(settings.get("counter", "0")),
         "set_no": settings.get("set_no", ""),
         "sensor_state": _analyzer.state,
-        "stabilize": getattr(_analyzer, "last_stabilize", {}),
+        "stabilize": stabilize,
+        "purge_seconds": config.PURGE_SECONDS,
+        "baseline_seconds": config.BASELINE_SECONDS,
         "warnings": list(_analyzer.startup_warnings),
     }
 
@@ -194,9 +207,9 @@ def scan_start() -> dict[str, Any]:
         "receipt_id": receipt_id,
         "counter": counter,
         "seconds": seconds,
-        "phase": "purge",
+        "phase": "starting",
         "phase_elapsed": 0.0,
-        "phase_total": config.PURGE_SECONDS,
+        "phase_total": 0.0,
         "phase_at": time.time(),
         "started_at": now.isoformat(timespec="seconds"),
     }

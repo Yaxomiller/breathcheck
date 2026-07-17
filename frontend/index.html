@@ -63,7 +63,7 @@
           <span>NO CAMERA</span>
         </div>
       </div>
-      <div class="scan-hint">READY &mdash; ASK SUBJECT TO BLOW</div>
+      <div class="scan-hint" id="scan-ready-hint">READY &mdash; SENSOR PREP STARTS AFTER TAP</div>
       <button id="btn-start-scan" class="btn-huge">START</button>
     </div>
 
@@ -85,6 +85,9 @@
           <div id="flash" class="flash"></div>
           <div id="photo-tag" class="photo-tag hidden">PHOTO ✓</div>
         </div>
+      </div>
+      <div class="scan-hint scan-phase-hint" id="scan-phase-hint" aria-live="polite">
+        STARTING SENSOR&hellip;
       </div>
     </div>
 

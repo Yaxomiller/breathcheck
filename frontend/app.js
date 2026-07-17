@@ -179,6 +179,8 @@ function enterScanReady() {
   state.photoData = "";
   showScanStage("scan-ready");
   startCamera();
+  refreshScanReadyStatus();
+  state.timers.poll = setInterval(refreshScanReadyStatus, 500);
 }
 
 function cancelCountdown() {
@@ -188,7 +190,40 @@ function cancelCountdown() {
   state.timers.poll = null;
 }
 
+async function refreshScanReadyStatus() {
+  if (state.screen !== "scan" || state.scan) return;
+  try {
+    const status = await api("/api/status");
+    const warming = status.sensor_state === "stabilizing";
+    const measuring = status.sensor_state === "measuring";
+    const button = $("#btn-start-scan");
+    button.disabled = warming || measuring;
+    if (warming) {
+      const elapsed = Math.max(0, Math.floor(Number(status.stabilize?.elapsed_s) || 0));
+      button.textContent = `WARM-UP ${elapsed}s`;
+      $("#scan-ready-hint").textContent = "INITIAL SENSOR WARM-UP — PLEASE WAIT";
+    } else if (measuring) {
+      button.textContent = "TEST RUNNING";
+      $("#scan-ready-hint").textContent = "SENSOR IS FINISHING THE CURRENT TEST — PLEASE WAIT";
+    } else {
+      const stabilizeSeconds = Math.ceil(Number(status.purge_seconds) || 15);
+      const baselineSeconds = Math.ceil(Number(status.baseline_seconds) || 5);
+      button.textContent = "START";
+      $("#scan-ready-hint").textContent =
+        `READY — ${stabilizeSeconds}s STABILIZE + ${baselineSeconds}s BASELINE, THEN BLOW`;
+      clearInterval(state.timers.poll);
+      state.timers.poll = null;
+    }
+  } catch (err) { /* keep the scan control usable during a transient status failure */ }
+}
+
 async function beginScan() {
+  const button = $("#btn-start-scan");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = "STARTING…";
+  clearInterval(state.timers.poll);
+  state.timers.poll = null;
   try {
     const [session, gpsFix] = await Promise.all([
       postJson("/api/scan/start", {}),
@@ -202,12 +237,34 @@ async function beginScan() {
     trackCycle(session);
   } catch (err) {
     toast(err.message, true);
+    button.disabled = false;
+    button.textContent = "START";
+    refreshScanReadyStatus();
+    state.timers.poll = setInterval(refreshScanReadyStatus, 500);
   }
 }
 
 /* Measurement cycle (driven by the backend / sensor board):
-   purge -> baseline (amber ring, WAIT) -> measure (cyan ring, BLOW). */
-const PHASE_LABEL = { purge: "WAIT", baseline: "WAIT", measure: "BLOW" };
+   purge/stabilize -> baseline -> measure/blow. */
+const PHASE_UI = {
+  starting: {
+    label: "STARTING",
+    hint: "STARTING SENSOR — PLEASE WAIT",
+    timed: false,
+  },
+  purge: {
+    label: "STABILIZE",
+    hint: "SENSOR STABILIZING — DO NOT BLOW YET",
+  },
+  baseline: {
+    label: "BASELINE",
+    hint: "SETTING FRESH-AIR BASELINE — DO NOT BLOW YET",
+  },
+  measure: {
+    label: "BLOW",
+    hint: "BLOW STEADILY UNTIL THE TIMER ENDS",
+  },
+};
 
 function trackCycle(session) {
   showScanStage("scan-run");
@@ -220,13 +277,43 @@ function trackCycle(session) {
   let lastCount = -1;
   let photoTaken = false;
   let polling = false;
+  let pollFailures = 0;
+
+  const showPhase = (phase, remaining, elapsed, total) => {
+    const isMeasure = phase === "measure";
+    const phaseUi = PHASE_UI[phase] || PHASE_UI.purge;
+    if (phase !== lastPhase) {
+      lastPhase = phase;
+      lastCount = -1;
+      $("#ring-label").textContent = phaseUi.label;
+      $("#scan-phase-hint").textContent = phaseUi.hint;
+      ring.classList.toggle("prep", !isMeasure);
+      $(".ring-wrap").classList.toggle("prep", !isMeasure);
+      beep(isMeasure ? 990 : 660, 120);
+    }
+    if (phaseUi.timed === false) {
+      ring.style.strokeDashoffset = "0";
+      $("#ring-count").textContent = "…";
+      return;
+    }
+    ring.style.strokeDashoffset = String(circumference * Math.min(1, elapsed / total));
+    const count = Math.max(0, Math.ceil(remaining));
+    if (count !== lastCount) {
+      lastCount = count;
+      $("#ring-count").textContent = String(count);
+      if (isMeasure && count > 0) sndTick();
+    }
+  };
+
+  showPhase("starting", 0, 0, 1);
   sndTick();
 
-  state.timers.countdown = setInterval(async () => {
+  const pollCycle = async () => {
     if (polling) return;
     polling = true;
     try {
       const status = await api(`/api/scan/${session.session_id}`);
+      pollFailures = 0;
       if (status.status === "done") {
         cancelCountdown();
         beep(660, 400);
@@ -248,21 +335,7 @@ function trackCycle(session) {
       const elapsed = total - remaining;
       const isMeasure = phase === "measure";
 
-      if (phase !== lastPhase) {
-        lastPhase = phase;
-        lastCount = -1;
-        $("#ring-label").textContent = PHASE_LABEL[phase] || "WAIT";
-        ring.classList.toggle("prep", !isMeasure);
-        $(".ring-wrap").classList.toggle("prep", !isMeasure);
-        beep(isMeasure ? 990 : 660, 120);
-      }
-      ring.style.strokeDashoffset = String(circumference * Math.min(1, elapsed / total));
-      const count = Math.max(0, Math.ceil(remaining));
-      if (count !== lastCount) {
-        lastCount = count;
-        $("#ring-count").textContent = String(count);
-        if (isMeasure && count > 0) sndTick();
-      }
+      showPhase(phase, remaining, elapsed, total);
 
       if (isMeasure && !photoTaken && elapsed >= session.photo_second) {
         photoTaken = true;
@@ -276,13 +349,21 @@ function trackCycle(session) {
         }
       }
     } catch (err) {
-      cancelCountdown();
-      $("#scan-error-msg").textContent = err.message;
-      showScanStage("scan-error");
+      // A single missed status poll is not a sensor failure. Keep the live
+      // test on screen and only fail after a sustained API interruption.
+      pollFailures += 1;
+      if (pollFailures >= 12) {
+        cancelCountdown();
+        $("#scan-error-msg").textContent = err.message;
+        showScanStage("scan-error");
+      }
     } finally {
       polling = false;
     }
-  }, 250);
+  };
+
+  state.timers.countdown = setInterval(pollCycle, 250);
+  void pollCycle();
 }
 
 function showResults(result) {
