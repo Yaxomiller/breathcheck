@@ -29,7 +29,7 @@ def _float(name: str, default: float) -> float:
 
 
 APP_NAME = "BreathCheck"
-APP_VERSION = "1.1.5"
+APP_VERSION = "1.1.6"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(_str("HH_DATA_DIR", str(BASE_DIR / "data")))

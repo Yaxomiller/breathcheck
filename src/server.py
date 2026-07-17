@@ -185,6 +185,12 @@ def _run_scan(session_id: str, measure_seconds: float) -> None:
                 "alcohol_peak": round(cycle.alcohol.peak / 1000.0, 3),
                 "cannabis_baseline": round(cycle.cannabis.baseline * analyzer_module.PID_MV_PER_LSB, 3),
                 "cannabis_peak": round(cycle.cannabis.peak * analyzer_module.PID_MV_PER_LSB, 3),
+                # TEMPORARY debug fields: sensor-native units (AD5941 nA,
+                # AD7798 ADC codes) shown on the result screen for calibration.
+                "alcohol_baseline_raw": round(cycle.alcohol.baseline, 1),
+                "alcohol_peak_raw": round(cycle.alcohol.peak, 1),
+                "cannabis_baseline_raw": round(cycle.cannabis.baseline, 1),
+                "cannabis_peak_raw": round(cycle.cannabis.peak, 1),
                 "baseline_stable": cycle.alcohol.stable and cycle.cannabis.stable,
                 "alcohol_flag": alcohol_flag,
                 "cannabis_flag": cannabis_flag,

@@ -388,8 +388,11 @@ function showResults(result) {
 
   $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
   $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
-  $("#sub-alcohol").textContent = `PEAK ${fmtVal(result.alcohol_peak || 0)} µA`;
-  $("#sub-cannabis").textContent = `PEAK ${fmtVal(result.cannabis_peak || 0)} mV`;
+  /* TEMPORARY: raw sensor-native values for calibration (revert on request) */
+  $("#sub-alcohol").textContent =
+    `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
+  $("#sub-cannabis").textContent =
+    `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
   setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
   setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
   result.test_result === "PASS" ? sndPass() : sndFail();
