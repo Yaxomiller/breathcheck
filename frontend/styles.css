@@ -156,7 +156,10 @@ main { flex: 1; position: relative; overflow: hidden; }
 .ring-fg {
   fill: none; stroke: var(--accent); stroke-width: 13; stroke-linecap: round;
   stroke-dasharray: 603.19; stroke-dashoffset: 0;
+  transition: stroke .3s;
 }
+.ring-fg.prep { stroke: var(--warn); }
+.ring-wrap.prep .ring-label { color: var(--warn); animation: none; }
 .ring-center {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -210,6 +213,7 @@ main { flex: 1; position: relative; overflow: hidden; }
 .rc-name { font-size: 14px; font-weight: 800; letter-spacing: 3px; color: var(--muted); }
 .rc-value { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
 .rc-value small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+.rc-sub { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); }
 .rc-flag { font-size: 15px; font-weight: 800; letter-spacing: 2px; }
 .result-card.pass .rc-flag { color: var(--good); }
 .result-card.fail .rc-flag { color: var(--bad); }

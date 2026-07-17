@@ -54,9 +54,19 @@ RECORD_FIELDS = (
     "test_date", "test_time", "calibr_date", "gps1", "gps2",
     "name", "dl_number", "vehicle_no", "test_location", "testing_officer",
     "testing_mode", "test_result", "alcohol_bac", "cannabis_ppb",
+    "alcohol_baseline", "alcohol_peak", "cannabis_baseline", "cannabis_peak",
     "alcohol_flag", "cannabis_flag", "mobile_no", "address", "photo_file",
     "created_at",
 )
+
+# Columns added after the first release; applied with ALTER TABLE on upgrade.
+# alcohol_baseline/peak are uA, cannabis_baseline/peak are mV.
+_MIGRATION_COLUMNS = {
+    "alcohol_baseline": "REAL DEFAULT 0",
+    "alcohol_peak": "REAL DEFAULT 0",
+    "cannabis_baseline": "REAL DEFAULT 0",
+    "cannabis_peak": "REAL DEFAULT 0",
+}
 
 
 def init_db() -> None:
@@ -68,6 +78,26 @@ def init_db() -> None:
     with _lock:
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.executescript(_SCHEMA)
+        for column, decl in _MIGRATION_COLUMNS.items():
+            try:
+                _conn.execute(f"ALTER TABLE records ADD COLUMN {column} {decl}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        # Limits from an older units scheme (raw ADC / mg) would silently
+        # misjudge the new mV*s integrals — reset them once on upgrade.
+        # Must run BEFORE the defaults are seeded, or the seeded
+        # units_version would mask an upgraded database.
+        row = _conn.execute("SELECT value FROM settings WHERE key = 'units_version'").fetchone()
+        if row is None or row["value"] != config.UNITS_VERSION:
+            _conn.execute("UPDATE settings SET value = ? WHERE key = 'alcohol_limit'",
+                          (config.DEFAULT_ALCOHOL_LIMIT,))
+            _conn.execute("UPDATE settings SET value = ? WHERE key = 'cannabis_limit'",
+                          (config.DEFAULT_CANNABIS_LIMIT,))
+            _conn.execute(
+                "INSERT INTO settings(key, value) VALUES ('units_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (config.UNITS_VERSION,),
+            )
         for key, value in config.DEFAULT_SETTINGS.items():
             _conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",

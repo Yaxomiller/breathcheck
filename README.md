@@ -42,15 +42,18 @@ Everything is environment-driven; defaults are development-safe (mock sensor,
 mock GPS).
 
 ```bash
-# PID breath board via STM32 SPI bridge (requires: pip install python-periphery)
+# DiDies breath board via STM32 SPI bridge (requires: pip install python-periphery)
 HH_ANALYZER_MODE=spi
-HH_SPI_DEVICE=/dev/spidev1.0     # SPI mode 0, 1 MHz
+HH_SPI_DEVICE=/dev/spidev1.0     # SPI mode 0, 500 kHz (SPI2-slave margin)
 HH_GPIO_CHIP=/dev/gpiochip1
-HH_BOARD_ENABLE_GPIO=256         # BRD_ON, PI0 pin 26 (output)
-HH_READY_GPIO=257                # doorbell, PI1 pin 32 (input, idle HIGH / active LOW)
-HH_PID_SOURCE=1                  # record source: 1=AD7798, 2=AD5941, 0=any
-HH_SAMPLE_AGGREGATION=mean       # mean | peak | last
-HH_ALCOHOL_SOURCE=mock           # alcohol stays placeholder until calibrated
+HH_BOARD_ENABLE_GPIO=256         # BRD_ON, PI0 pin 26 (opened atomically HIGH)
+HH_READY_GPIO=257                # doorbell, PI1 pin 32 (idle HIGH / active LOW)
+HH_PUMP_GPIO=271                 # air pump, PI15, ACTIVE HIGH
+HH_RTIA_KOHM=4.0                 # AD5941 LPTIA Rtia — keep in sync with firmware
+HH_PURGE_SECONDS=15              # pump-on purge before baseline
+HH_BASELINE_SECONDS=5            # fresh-air zero window
+HH_SETTLE_SLOPE_NA_S=30          # app-start stabilize: settled drift threshold
+HH_STABILIZE_MAX_S=180
 
 # NMEA serial GPS (requires: pip install pyserial)
 HH_GPS_MODE=nmea
@@ -58,18 +61,34 @@ HH_GPS_SERIAL_PORT=/dev/ttyS0
 HH_GPS_SERIAL_BAUD=9600
 ```
 
-Board protocol: the app powers the board via BRD_ON, waits for the doorbell
-falling edge, and answers each edge with one full-duplex 246-byte transfer
-(header `AA 55` + record count, 20 records x 12 bytes `uint32 tick, uint16
-src, 2 pad, int32 val` little-endian, CRC16-CCITT). The first exchange sends
-PID startup `0xA0`; a final exchange sends PID shutdown `0xA1`. Frames are
-collected for the whole exhale window and aggregated.
+Board protocol (doorbell/frame): the board is powered once via BRD_ON
+(requested atomically HIGH so the STM32 is never reset by a power blip) and
+stays on between tests — the firmware's zero-offset calibration runs at its
+boot. Each doorbell falling edge is answered within 100 ms by one full-duplex
+246-byte transfer (header `AA 55` + record count, 20 records x 12 bytes
+`uint32 tick_ms, uint16 src, 2 pad, int32 val` little-endian, CRC16-CCITT).
+Commands ride on frame byte 0: `0xA0/0xA1` PID on/off, `0xB0/0xB1` alcohol
+AFE on/off. Sources: 1 = AD7798 (PID/cannabis, codes at 19.073 µV/LSB),
+2 = AD5941 (alcohol fuel cell, nA; V = I·Rtia at 4 kΩ), 3 = SYS 1 Hz
+keepalive (bit0 PID on, bit1 AFE running).
 
-**Cannabis is shown as the RAW ADC value** (no ppb conversion is applied yet):
-the results card, the police form, the database detail, the CSV export and the
-printed receipt all carry the raw PID reading, and the cannabis limit in
-Settings is compared in raw ADC counts. The API/DB field is still named
-`cannabis_ppb` for compatibility.
+Measurement cycle, timed in the STM32 tick domain: **15 s purge** (pump ON,
+GPIO 271 active-high) → **5 s fresh-air baseline** → **10 s blow**. Per-sample
+delta = value − baseline; the reported reading for BOTH channels is the
+**trapezoidal integral of the delta in mV·s** (the AL-05P datasheet specs
+linearity as the integral of output), with peak deltas stored alongside
+(alcohol peak in µA, cannabis peak in mV). After the cycle, sensors are shut
+down and the alcohol cell idles virtually shorted (biased at 0 V) — a 2-lead
+fuel cell must be stored shorted or it polarizes and drifts.
+
+At app start the backend runs a **stabilize pass** (pump off, PID off, AFE
+sampling on) until the alcohol baseline drift stays under 30 nA/s, then stops
+sampling with the cell still biased. The home screen shows SENSOR WARM-UP
+during this; scans are rejected with a friendly message until it finishes.
+
+**Readings are uncalibrated mV·s integrals** — the PASS/FAIL limits in
+Settings are compared in mV·s and must be set after calibration. The API/DB
+fields are still named `alcohol_bac` / `cannabis_ppb` for compatibility.
 
 On Linux the brightness setting drives `/sys/class/backlight`; elsewhere the
 UI applies a software dim so the control still works everywhere.

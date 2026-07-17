@@ -100,12 +100,14 @@
       <div class="result-cards">
         <div class="result-card" id="card-alcohol">
           <div class="rc-name">ALCOHOL</div>
-          <div class="rc-value"><span id="val-alcohol">0.0</span><small>mg/100ml</small></div>
+          <div class="rc-value"><span id="val-alcohol">0.0</span><small>mV&middot;s</small></div>
+          <div class="rc-sub" id="sub-alcohol"></div>
           <div class="rc-flag" id="flag-alcohol">PASS</div>
         </div>
         <div class="result-card" id="card-cannabis">
           <div class="rc-name">CANNABIS</div>
-          <div class="rc-value"><span id="val-cannabis">0</span><small>ADC</small></div>
+          <div class="rc-value"><span id="val-cannabis">0.0</span><small>mV&middot;s</small></div>
+          <div class="rc-sub" id="sub-cannabis"></div>
           <div class="rc-flag" id="flag-cannabis">PASS</div>
         </div>
       </div>
@@ -218,8 +220,8 @@
 
       <div class="set-group">
         <div class="set-title">LIMITS</div>
-        <div class="set-row"><span>ALCOHOL</span><input type="number" id="set-alimit" min="0" step="1"><em>mg/100ml</em></div>
-        <div class="set-row"><span>CANNABIS</span><input type="number" id="set-climit" min="0" step="1"><em>ADC</em></div>
+        <div class="set-row"><span>ALCOHOL</span><input type="number" id="set-alimit" min="0" step="0.5"><em>mV&middot;s</em></div>
+        <div class="set-row"><span>CANNABIS</span><input type="number" id="set-climit" min="0" step="0.5"><em>mV&middot;s</em></div>
       </div>
 
       <div class="set-group">

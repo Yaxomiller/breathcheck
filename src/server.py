@@ -21,6 +21,7 @@ import base64
 import csv
 import io
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -38,6 +39,11 @@ app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
 _analyzer = analyzer_module.resolve_analyzer()
 _gps = GpsProvider()
+
+# Prime the alcohol cell once at app start (SPI board only): AFE sampling on,
+# wait for the baseline drift to settle, leave the cell biased.
+if _analyzer.name == "spi":
+    threading.Thread(target=_analyzer.stabilize, daemon=True).start()
 
 _sessions: dict[str, dict[str, Any]] = {}
 _sessions_lock = threading.Lock()
@@ -66,6 +72,10 @@ class RecordIn(BaseModel):
     test_result: str = ""
     alcohol_bac: float = 0.0
     cannabis_ppb: float = 0.0
+    alcohol_baseline: float = 0.0
+    alcohol_peak: float = 0.0
+    cannabis_baseline: float = 0.0
+    cannabis_peak: float = 0.0
     alcohol_flag: str = "NO"
     cannabis_flag: str = "NO"
     mobile_no: str = ""
@@ -108,27 +118,47 @@ def status() -> dict[str, Any]:
         "records": db.count_records(),
         "counter": int(settings.get("counter", "0")),
         "set_no": settings.get("set_no", ""),
+        "sensor_state": _analyzer.state,
+        "stabilize": getattr(_analyzer, "last_stabilize", {}),
         "warnings": list(_analyzer.startup_warnings),
     }
 
 
 # --- Scan flow ----------------------------------------------------------------
 
-def _run_scan(session_id: str, seconds: float) -> None:
+def _run_scan(session_id: str, measure_seconds: float) -> None:
+    def progress(phase: str, elapsed: float, total: float) -> None:
+        with _sessions_lock:
+            session = _sessions.get(session_id)
+            if session is not None and session["status"] == "running":
+                session["phase"] = phase
+                session["phase_elapsed"] = round(elapsed, 2)
+                session["phase_total"] = total
+                session["phase_at"] = time.time()
+
     try:
-        reading = _analyzer.read(seconds)
+        cycle = _analyzer.run_cycle(measure_seconds, progress)
         settings = db.get_settings()
-        alcohol_limit = float(settings.get("alcohol_limit", "30"))
-        cannabis_limit = float(settings.get("cannabis_limit", "10"))
-        alcohol_flag = "YES" if reading.alcohol_bac > alcohol_limit else "NO"
-        cannabis_flag = "YES" if reading.cannabis_raw > cannabis_limit else "NO"
+        alcohol_limit = float(settings.get("alcohol_limit", config.DEFAULT_ALCOHOL_LIMIT))
+        cannabis_limit = float(settings.get("cannabis_limit", config.DEFAULT_CANNABIS_LIMIT))
+        alcohol_value = cycle.alcohol.integral_mvs
+        cannabis_value = cycle.cannabis.integral_mvs
+        alcohol_flag = "YES" if alcohol_value > alcohol_limit else "NO"
+        cannabis_flag = "YES" if cannabis_value > cannabis_limit else "NO"
         now = datetime.now()
         update = {
             "status": "done",
             "result": {
-                "alcohol_bac": reading.alcohol_bac,
-                # raw PID ADC value — no ppb conversion is available yet
-                "cannabis_ppb": reading.cannabis_raw,
+                # Compat keys: alcohol_bac / cannabis_ppb carry the mV*s
+                # integrals of the delta above the fresh-air baseline.
+                "alcohol_bac": alcohol_value,
+                "cannabis_ppb": cannabis_value,
+                # AD5941 in uA, AD7798 in mV.
+                "alcohol_baseline": round(cycle.alcohol.baseline / 1000.0, 3),
+                "alcohol_peak": round(cycle.alcohol.peak / 1000.0, 3),
+                "cannabis_baseline": round(cycle.cannabis.baseline * analyzer_module.PID_MV_PER_LSB, 3),
+                "cannabis_peak": round(cycle.cannabis.peak * analyzer_module.PID_MV_PER_LSB, 3),
+                "baseline_stable": cycle.alcohol.stable and cycle.cannabis.stable,
                 "alcohol_flag": alcohol_flag,
                 "cannabis_flag": cannabis_flag,
                 "alcohol_limit": alcohol_limit,
@@ -147,6 +177,11 @@ def _run_scan(session_id: str, seconds: float) -> None:
 
 @app.post("/api/scan/start")
 def scan_start() -> dict[str, Any]:
+    if _analyzer.state == "stabilizing":
+        raise HTTPException(status_code=409, detail="SENSOR WARMING UP — TRY AGAIN SOON")
+    if _analyzer.state == "measuring":
+        raise HTTPException(status_code=409, detail="TEST ALREADY RUNNING")
+
     settings = db.get_settings()
     seconds = max(3, int(float(settings.get("scan_seconds", "10"))))
     counter = db.next_counter()
@@ -159,6 +194,10 @@ def scan_start() -> dict[str, Any]:
         "receipt_id": receipt_id,
         "counter": counter,
         "seconds": seconds,
+        "phase": "purge",
+        "phase_elapsed": 0.0,
+        "phase_total": config.PURGE_SECONDS,
+        "phase_at": time.time(),
         "started_at": now.isoformat(timespec="seconds"),
     }
     with _sessions_lock:
@@ -174,6 +213,8 @@ def scan_start() -> dict[str, Any]:
         "receipt_id": receipt_id,
         "counter": counter,
         "seconds": seconds,
+        "purge_seconds": config.PURGE_SECONDS,
+        "baseline_seconds": config.BASELINE_SECONDS,
         "photo_second": max(1, int(float(settings.get("photo_second", "4")))),
         "area": settings.get("area", ""),
         "version": settings.get("version", config.APP_VERSION),
@@ -190,7 +231,12 @@ def scan_status(session_id: str) -> dict[str, Any]:
         session = _sessions.get(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Unknown scan session")
-        return dict(session)
+        result = dict(session)
+    if result["status"] == "running" and "phase_at" in result:
+        drift = time.time() - result["phase_at"]
+        elapsed = min(result["phase_total"], result["phase_elapsed"] + drift)
+        result["phase_remaining"] = round(max(0.0, result["phase_total"] - elapsed), 2)
+    return result
 
 
 # --- Records --------------------------------------------------------------------

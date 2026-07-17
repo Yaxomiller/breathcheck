@@ -29,7 +29,7 @@ def _float(name: str, default: float) -> float:
 
 
 APP_NAME = "BreathCheck"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(_str("HH_DATA_DIR", str(BASE_DIR / "data")))
@@ -44,31 +44,34 @@ WEB_PORT = _int("HH_WEB_PORT", 8000)
 # "mock" on a PC, "spi" on the device with the sensor board attached.
 ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()
 
-# Mock ranges. Cannabis is a raw ADC count (the app shows the raw PID value).
-MOCK_ALCOHOL_MIN = _float("HH_MOCK_ALCOHOL_MIN", 0.0)      # mg/100ml BAC
-MOCK_ALCOHOL_MAX = _float("HH_MOCK_ALCOHOL_MAX", 60.0)
-MOCK_CANNABIS_MIN = _float("HH_MOCK_CANNABIS_MIN", 0.0)    # raw ADC counts
-MOCK_CANNABIS_MAX = _float("HH_MOCK_CANNABIS_MAX", 60000.0)
+# Measurement cycle (seconds). The blow window itself is the officer-visible
+# "scan time" setting; purge/baseline are hardware timings.
+PURGE_SECONDS = _float("HH_PURGE_SECONDS", 15.0)      # pump on, sensors warming
+BASELINE_SECONDS = _float("HH_BASELINE_SECONDS", 5.0)  # fresh-air zero
 
-# PID breath board — doorbell/frame protocol (STM32 bridge).
+# STM32 SPI bridge wiring.
 SPI_DEVICE = _str("HH_SPI_DEVICE", "/dev/spidev1.0")
 SPI_MODE = _int("HH_SPI_MODE", 0)
-SPI_SPEED_HZ = _int("HH_SPI_SPEED_HZ", 1_000_000)
+SPI_SPEED_HZ = _int("HH_SPI_SPEED_HZ", 500_000)   # 500 kHz for SPI2-slave margin
 GPIO_CHIP = _str("HH_GPIO_CHIP", "/dev/gpiochip1")
-BOARD_ENABLE_GPIO = _int("HH_BOARD_ENABLE_GPIO", 256)   # BRD_ON, PI0 pin 26 (out)
-READY_GPIO = _int("HH_READY_GPIO", 257)                 # doorbell, PI1 pin 32 (in, idle HIGH)
+BOARD_ENABLE_GPIO = _int("HH_BOARD_ENABLE_GPIO", 256)   # BRD_ON, PI0 pin 26
+READY_GPIO = _int("HH_READY_GPIO", 257)                 # doorbell, PI1 pin 32
+PUMP_GPIO = _int("HH_PUMP_GPIO", 271)                   # air pump, PI15, ACTIVE HIGH
 DOORBELL_TIMEOUT_SECONDS = _float("HH_DOORBELL_TIMEOUT_SECONDS", 5.0)
 
-# Which record source carries the PID (cannabis) reading: 1=AD7798, 2=AD5941,
-# 0=accept any source.
-PID_SOURCE = _int("HH_PID_SOURCE", 1)
-SAMPLE_AGGREGATION = _str("HH_SAMPLE_AGGREGATION", "mean").lower()  # mean|peak|last
+# Unit conversion — keep in sync with the STM32 firmware.
+RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 
-# Blood alcohol: "adc" applies raw*scale+offset to the aggregated PID value,
-# anything else keeps the placeholder until a real alcohol path is wired.
-ALCOHOL_SOURCE = _str("HH_ALCOHOL_SOURCE", "mock").lower()  # adc|mock
-ALCOHOL_SCALE = _float("HH_ALCOHOL_SCALE", 1.0)
-ALCOHOL_OFFSET = _float("HH_ALCOHOL_OFFSET", 0.0)
+# Alcohol-cell stabilization at app start (fresh-air settle).
+SETTLE_SLOPE_NA_S = _float("HH_SETTLE_SLOPE_NA_S", 30.0)
+SETTLE_WINDOW_MS = _float("HH_SETTLE_WINDOW_MS", 10000.0)
+STABILIZE_MAX_S = _float("HH_STABILIZE_MAX_S", 180.0)
+
+# Mock reading ranges — integrals in mV*s, matching the live measurement.
+MOCK_ALCOHOL_MIN = _float("HH_MOCK_ALCOHOL_MIN", 0.0)
+MOCK_ALCOHOL_MAX = _float("HH_MOCK_ALCOHOL_MAX", 30.0)
+MOCK_CANNABIS_MIN = _float("HH_MOCK_CANNABIS_MIN", 0.0)
+MOCK_CANNABIS_MAX = _float("HH_MOCK_CANNABIS_MAX", 6.0)
 
 # --- GPS --------------------------------------------------------------------
 # "mock" on a PC, "nmea" with a serial GPS module, "off" to disable.
@@ -79,6 +82,12 @@ GPS_MOCK_LAT = _float("HH_GPS_MOCK_LAT", 28.613939)
 GPS_MOCK_LON = _float("HH_GPS_MOCK_LON", 77.209023)
 
 # --- Default device settings (seeded into the DB on first boot) -------------
+# units_version bumps when the meaning of the limit values changes; db.init_db
+# resets stale limits so old thresholds don't silently misjudge new readings.
+UNITS_VERSION = "2"
+DEFAULT_ALCOHOL_LIMIT = "15"   # mV*s integral — calibrate on real hardware
+DEFAULT_CANNABIS_LIMIT = "3"   # mV*s integral — calibrate on real hardware
+
 DEFAULT_SETTINGS = {
     "area": _str("HH_AREA", "ZONE 1"),
     "version": APP_VERSION,
@@ -86,11 +95,12 @@ DEFAULT_SETTINGS = {
     "calibr_date": _str("HH_CALIBR_DATE", "2026-07-01"),
     "testing_mode": "ACTIVE",
     "officer": "",
-    "alcohol_limit": "30",       # mg/100ml
-    "cannabis_limit": "30000",   # raw ADC counts
-    "scan_seconds": "10",
-    "photo_second": "4",
+    "alcohol_limit": DEFAULT_ALCOHOL_LIMIT,
+    "cannabis_limit": DEFAULT_CANNABIS_LIMIT,
+    "scan_seconds": "10",      # MEASURE (blow) window
+    "photo_second": "4",       # seconds into the blow window
     "brightness": "80",
     "sound": "1",
     "counter": "0",
+    "units_version": UNITS_VERSION,
 }

@@ -10,10 +10,11 @@ const api = async (path, options) => {
 };
 const postJson = (path, data, method = "POST") =>
   api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-/* raw ADC counts: whole numbers with separators once they get big */
+/* mV·s integrals: two decimals while small, rounded once large */
 const fmtVal = (value) => {
   const n = Number(value) || 0;
-  return Math.abs(n) >= 1000 ? Math.round(n).toLocaleString("en-US") : n.toFixed(1);
+  if (Math.abs(n) >= 1000) return Math.round(n).toLocaleString("en-US");
+  return Math.abs(n) >= 100 ? n.toFixed(1) : n.toFixed(2);
 };
 
 const state = {
@@ -118,7 +119,9 @@ async function refreshStatus() {
     const status = await api("/api/status");
     $("#chip-set").textContent = `SET ${status.set_no || "--"}`;
     $("#chip-records").textContent = `${status.records} RECORD${status.records === 1 ? "" : "S"}`;
-    $("#chip-sensor").textContent = status.analyzer === "spi" ? "SENSOR LIVE" : "SENSOR DEMO";
+    $("#chip-sensor").textContent =
+      status.sensor_state === "stabilizing" ? "SENSOR WARM-UP"
+        : status.analyzer === "spi" ? "SENSOR LIVE" : "SENSOR DEMO";
   } catch (err) { /* backend not ready yet */ }
 }
 
@@ -196,79 +199,90 @@ async function beginScan() {
       gps1: gpsFix && gpsFix.fix ? String(gpsFix.lat) : "",
       gps2: gpsFix && gpsFix.fix ? String(gpsFix.lon) : "",
     };
-    runCountdown(session.seconds, session.photo_second);
+    trackCycle(session);
   } catch (err) {
     toast(err.message, true);
   }
 }
 
-function runCountdown(totalSeconds, photoSecond) {
+/* Measurement cycle (driven by the backend / sensor board):
+   purge -> baseline (amber ring, WAIT) -> measure (cyan ring, BLOW). */
+const PHASE_LABEL = { purge: "WAIT", baseline: "WAIT", measure: "BLOW" };
+
+function trackCycle(session) {
   showScanStage("scan-run");
   $("#photo-tag").classList.add("hidden");
-  $("#ring-label").textContent = "BLOW";
   state.photoData = "";
 
   const ring = $("#ring-fg");
   const circumference = 2 * Math.PI * 96;
-  const startedAt = performance.now();
-  let lastWholeSecond = -1;
+  let lastPhase = "";
+  let lastCount = -1;
   let photoTaken = false;
+  let polling = false;
   sndTick();
 
-  state.timers.countdown = setInterval(() => {
-    const elapsed = (performance.now() - startedAt) / 1000;
-    const remaining = Math.max(0, totalSeconds - elapsed);
-    ring.style.strokeDashoffset = String(circumference * (elapsed / totalSeconds));
-    $("#ring-count").textContent = String(Math.ceil(remaining));
-
-    const whole = Math.floor(elapsed);
-    if (whole !== lastWholeSecond && remaining > 0.2) {
-      lastWholeSecond = whole;
-      if (whole > 0) sndTick();
-    }
-
-    if (!photoTaken && elapsed >= photoSecond) {
-      photoTaken = true;
-      state.photoData = capturePhoto();
-      if (state.photoData) {
-        $("#flash").classList.remove("go");
-        void $("#flash").offsetWidth;
-        $("#flash").classList.add("go");
-        $("#photo-tag").classList.remove("hidden");
-        sndShutter();
-      }
-    }
-
-    if (elapsed >= totalSeconds) {
-      cancelCountdown();
-      beep(660, 400);
-      awaitResult();
-    }
-  }, 100);
-}
-
-function awaitResult() {
-  showScanStage("scan-wait");
-  const deadline = Date.now() + 20000;
-  state.timers.poll = setInterval(async () => {
+  state.timers.countdown = setInterval(async () => {
+    if (polling) return;
+    polling = true;
     try {
-      const session = await api(`/api/scan/${state.scan.session_id}`);
-      if (session.status === "done") {
+      const status = await api(`/api/scan/${session.session_id}`);
+      if (status.status === "done") {
         cancelCountdown();
-        state.result = session.result;
-        showResults(session.result);
-      } else if (session.status === "error" || Date.now() > deadline) {
+        beep(660, 400);
+        state.result = status.result;
+        showResults(status.result);
+        return;
+      }
+      if (status.status === "error") {
         cancelCountdown();
-        $("#scan-error-msg").textContent = session.error || "No response from sensor";
+        $("#scan-error-msg").textContent = status.error || "No response from sensor";
         showScanStage("scan-error");
         sndFail();
+        return;
+      }
+
+      const phase = status.phase || "purge";
+      const total = status.phase_total || 1;
+      const remaining = status.phase_remaining != null ? status.phase_remaining : total;
+      const elapsed = total - remaining;
+      const isMeasure = phase === "measure";
+
+      if (phase !== lastPhase) {
+        lastPhase = phase;
+        lastCount = -1;
+        $("#ring-label").textContent = PHASE_LABEL[phase] || "WAIT";
+        ring.classList.toggle("prep", !isMeasure);
+        $(".ring-wrap").classList.toggle("prep", !isMeasure);
+        beep(isMeasure ? 990 : 660, 120);
+      }
+      ring.style.strokeDashoffset = String(circumference * Math.min(1, elapsed / total));
+      const count = Math.max(0, Math.ceil(remaining));
+      if (count !== lastCount) {
+        lastCount = count;
+        $("#ring-count").textContent = String(count);
+        if (isMeasure && count > 0) sndTick();
+      }
+
+      if (isMeasure && !photoTaken && elapsed >= session.photo_second) {
+        photoTaken = true;
+        state.photoData = capturePhoto();
+        if (state.photoData) {
+          $("#flash").classList.remove("go");
+          void $("#flash").offsetWidth;
+          $("#flash").classList.add("go");
+          $("#photo-tag").classList.remove("hidden");
+          sndShutter();
+        }
       }
     } catch (err) {
       cancelCountdown();
       $("#scan-error-msg").textContent = err.message;
       showScanStage("scan-error");
+    } finally {
+      polling = false;
     }
-  }, 400);
+  }, 250);
 }
 
 function showResults(result) {
@@ -277,11 +291,14 @@ function showResults(result) {
   verdict.textContent = result.test_result;
   verdict.className = `verdict ${result.test_result === "PASS" ? "good" : "bad"}`;
 
-  $("#val-alcohol").textContent = result.alcohol_bac.toFixed(1);
+  $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
   $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
+  $("#sub-alcohol").textContent = `PEAK ${fmtVal(result.alcohol_peak || 0)} µA`;
+  $("#sub-cannabis").textContent = `PEAK ${fmtVal(result.cannabis_peak || 0)} mV`;
   setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
   setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
   result.test_result === "PASS" ? sndPass() : sndFail();
+  if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
 
 function setResultCard(cardSel, flagSel, flag) {
@@ -306,8 +323,8 @@ function openForm() {
     ["GPS 1", state.gpsFix.gps1 || "--"], ["GPS 2", state.gpsFix.gps2 || "--"],
     ["MODE", scan.testing_mode],
     ["RESULT", result.test_result, result.test_result === "PASS" ? "good" : "bad"],
-    ["ALCOHOL", `${result.alcohol_bac.toFixed(1)} mg`, result.alcohol_flag === "YES" ? "bad" : "good"],
-    ["CANNABIS", `${fmtVal(result.cannabis_ppb)} ADC`, result.cannabis_flag === "YES" ? "bad" : "good"],
+    ["ALCOHOL", `${fmtVal(result.alcohol_bac)} mV·s`, result.alcohol_flag === "YES" ? "bad" : "good"],
+    ["CANNABIS", `${fmtVal(result.cannabis_ppb)} mV·s`, result.cannabis_flag === "YES" ? "bad" : "good"],
   ];
   $("#auto-grid").innerHTML = autoItems.map(([label, value, cls]) =>
     `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${value}</b></div>`).join("");
@@ -358,6 +375,8 @@ async function saveRecord() {
       testing_mode: scan.testing_mode,
       test_result: result.test_result,
       alcohol_bac: result.alcohol_bac, cannabis_ppb: result.cannabis_ppb,
+      alcohol_baseline: result.alcohol_baseline || 0, alcohol_peak: result.alcohol_peak || 0,
+      cannabis_baseline: result.cannabis_baseline || 0, cannabis_peak: result.cannabis_peak || 0,
       alcohol_flag: result.alcohol_flag, cannabis_flag: result.cannabis_flag,
       mobile_no: $("#f-mobile").value.trim(),
       address: $("#f-address").value.trim(),
@@ -389,8 +408,8 @@ function buildPrintReceipt(receiptId, name) {
     ["Location", $("#f-location").value.trim() || "--"],
     ["Officer", $("#f-officer").value.trim() || "--"],
     ["Mode", scan.testing_mode],
-    ["Alcohol", `${result.alcohol_bac.toFixed(1)} mg/100ml [${result.alcohol_flag === "YES" ? "FAIL" : "PASS"}]`],
-    ["Cannabis", `${fmtVal(result.cannabis_ppb)} ADC [${result.cannabis_flag === "YES" ? "FAIL" : "PASS"}]`],
+    ["Alcohol", `${fmtVal(result.alcohol_bac)} mV.s [${result.alcohol_flag === "YES" ? "FAIL" : "PASS"}]`],
+    ["Cannabis", `${fmtVal(result.cannabis_ppb)} mV.s [${result.cannabis_flag === "YES" ? "FAIL" : "PASS"}]`],
   ];
   $("#print-receipt").innerHTML = `
     <h3>BREATHCHECK</h3>
@@ -439,8 +458,10 @@ async function openRecordDetail(id) {
       ["CALIBR DATE", record.calibr_date], ["MODE", record.testing_mode],
       ["GPS 1", record.gps1], ["GPS 2", record.gps2],
       ["LOCATION", record.test_location], ["OFFICER", record.testing_officer],
-      ["ALCOHOL", `${Number(record.alcohol_bac).toFixed(1)} mg/100ml`, record.alcohol_flag === "YES" ? "bad" : "good"],
-      ["CANNABIS", `${fmtVal(record.cannabis_ppb)} ADC`, record.cannabis_flag === "YES" ? "bad" : "good"],
+      ["ALCOHOL", `${fmtVal(record.alcohol_bac)} mV·s`, record.alcohol_flag === "YES" ? "bad" : "good"],
+      ["CANNABIS", `${fmtVal(record.cannabis_ppb)} mV·s`, record.cannabis_flag === "YES" ? "bad" : "good"],
+      ["ALC PEAK", `${fmtVal(record.alcohol_peak || 0)} µA`],
+      ["CAN PEAK", `${fmtVal(record.cannabis_peak || 0)} mV`],
       ["RESULT", record.test_result, record.test_result === "PASS" ? "good" : "bad"],
     ];
     $("#modal-body").innerHTML = `

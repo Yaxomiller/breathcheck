@@ -1,44 +1,72 @@
-"""Breath sensor drivers.
+"""Breath sensor drivers — DiDies breathalyzer measurement cycle.
 
 Two implementations behind one interface:
 
-- MockAnalyzer     : random-but-realistic readings for development machines.
-- SpiBreathAnalyzer: the PID sensor board behind an STM32 SPI bridge.
+- MockAnalyzer     : simulates the same phased cycle on development machines.
+- SpiBreathAnalyzer: the STM32 sensor board over SPI (doorbell protocol).
 
-The live board uses a doorbell/frame protocol:
+Measurement cycle, timed in the STM32 tick domain (immune to host latency):
 
-- BRD_ON GPIO powers the board; the READY GPIO is a doorbell input
-  (idle HIGH, falling edge = a frame is ready and must be read within 100 ms).
-- Each exchange is ONE full-duplex 246-byte transfer:
-  header (0xAA 0x55, record count, pad) + 20 records x 12 bytes + CRC16-CCITT.
-- Record layout (little-endian): uint32 tick, uint16 source, 2 pad, int32 value.
-  Sources: 1 = AD7798, 2 = AD5941.
-- First-byte commands: 0x00 none, 0xA0 PID startup, 0xA1 PID shutdown.
+  PURGE     pump ON (active-high), PID + alcohol AFE switched on via frame
+            commands; readings streamed, not analysed
+  BASELINE  per-sensor averages -> fresh-air zero
+  MEASURE   subject blows; per-sample delta = x - baseline, trapezoidal
+            integral over the window for BOTH sensors, reported in mV*s
+            (the AL-05P datasheet specs linearity as the INTEGRAL of output);
+            peak deltas tracked too
+  SHUTDOWN  AFE sampling + PID off, pump off. The alcohol cell idles
+            VIRTUALLY SHORTED (LP loop stays biased at 0 V) — a 2-lead fuel
+            cell must be stored shorted or it polarizes and drifts.
 
-The cannabis reading is reported as the RAW aggregated ADC value from the PID
-source — no ppb conversion is applied (calibration is not available yet).
-`read(seconds)` blocks for the exhale window in SPI mode.
+Sources:  1 = AD7798 (PID / cannabis, ADC codes, 19.073 uV/LSB)
+          2 = AD5941 (alcohol fuel cell, nA; V = I * Rtia at Rtia = 4k)
+          3 = SYS 1 Hz keepalive (val bit0 = PID on, bit1 = AFE running);
+              guarantees frames >= 1 Hz so on/off commands (which only ride
+              on frames) can always be delivered.
+
+The board is powered once and left on between cycles; the firmware's
+zero-offset calibration runs at its boot. BRD_ON is requested as output-HIGH
+in one atomic step ("high") — requesting plain "out" would drive it LOW
+first and reset the STM32 on every start.
+
+`stabilize()` is app-start priming: pump OFF, PID lamp OFF, AFE sampling ON;
+waits until the alcohol baseline drift stays under SETTLE_SLOPE_NA_S, then
+stops sampling (cell remains biased). Run once at boot; each cycle's own
+purge handles the pump-airflow step from a settled starting point.
 """
 from __future__ import annotations
 
 import importlib
 import random
 import struct
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from src import config
 
 CMD_NONE = 0x00
 CMD_PID_STARTUP = 0xA0
 CMD_PID_SHUTDOWN = 0xA1
+CMD_AFE_STARTUP = 0xB0
+CMD_AFE_SHUTDOWN = 0xB1
+
+SRC_AD7798, SRC_AD5941, SRC_SYS = 1, 2, 3
 
 MAX_RECORDS = 20
 RECORD_SIZE = 12
-FRAME_MAX = 4 + MAX_RECORDS * RECORD_SIZE + 2  # hdr + records + CRC16 = 246
+FRAME_MAX = 4 + MAX_RECORDS * RECORD_SIZE + 2  # 246 bytes: hdr + records + CRC16
 
-SOURCE_NAMES = {1: "AD7798", 2: "AD5941"}
+# AD5941: V = I * Rtia -> 1 uA = 4 mV at Rtia = 4 kOhm (LPTIARTIA_4K).
+# AD7798: mV per LSB (unipolar, gain 2, Vref 2.5 V).
+PID_MV_PER_LSB = 2.5 / (2 * 65536) * 1000.0   # 0.019073 mV
+
+BASELINE_SPREAD_WARN = {SRC_AD5941: 200,   # nA
+                        SRC_AD7798: 300}   # codes (PID drifts during warm-up)
+
+# progress(phase, elapsed_seconds, total_seconds); phase: purge|baseline|measure
+ProgressFn = Callable[[str, float, float], None]
 
 
 def crc16_ccitt(data: bytes) -> int:
@@ -50,18 +78,42 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
+def _finite(value: float) -> float:
+    return float(value) if value == value and abs(value) != float("inf") else 0.0
+
+
 @dataclass(frozen=True)
-class Reading:
-    alcohol_bac: float      # blood alcohol, mg/100ml
-    cannabis_raw: float     # raw PID ADC value (no conversion)
+class ChannelResult:
+    baseline: float        # raw units (AD5941 nA, AD7798 codes)
+    peak: float            # raw delta above baseline
+    peak_t_ms: int         # ms into the cycle at the peak
+    integral_mvs: float    # trapezoidal integral of the delta, mV*s
+    stable: bool = True    # baseline spread within tolerance
+
+
+@dataclass(frozen=True)
+class CycleResult:
+    alcohol: ChannelResult    # AD5941 fuel cell
+    cannabis: ChannelResult   # AD7798 PID
+
+
+def _mvs(src: int, integ_raw_ms: float) -> float:
+    """Convert a raw trapezoidal integral (raw-unit * ms) to mV*s."""
+    if src == SRC_AD5941:
+        return integ_raw_ms * config.RTIA_KOHM / 1e6          # nA*ms -> mV*s
+    return integ_raw_ms * PID_MV_PER_LSB / 1000.0             # code*ms -> mV*s
 
 
 class BreathAnalyzer:
     name = "base"
     startup_warnings: tuple[str, ...] = ()
+    state = "ready"   # ready | stabilizing | measuring | error
 
-    def read(self, seconds: float) -> Reading:
+    def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
         raise NotImplementedError
+
+    def stabilize(self) -> None:
+        """App-start priming; no-op for the mock."""
 
 
 class MockAnalyzer(BreathAnalyzer):
@@ -69,15 +121,47 @@ class MockAnalyzer(BreathAnalyzer):
 
     def __init__(self, startup_warnings: tuple[str, ...] = ()) -> None:
         self.startup_warnings = startup_warnings
+        self._lock = threading.Lock()
 
-    def read(self, seconds: float) -> Reading:
-        del seconds
-        alcohol = random.uniform(config.MOCK_ALCOHOL_MIN, config.MOCK_ALCOHOL_MAX)
-        cannabis = random.uniform(config.MOCK_CANNABIS_MIN, config.MOCK_CANNABIS_MAX)
-        return Reading(
-            alcohol_bac=round(max(0.0, alcohol), 1),
-            cannabis_raw=float(round(cannabis)),
-        )
+    def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
+        with self._lock:
+            self.state = "measuring"
+            try:
+                phases = (
+                    ("purge", config.PURGE_SECONDS),
+                    ("baseline", config.BASELINE_SECONDS),
+                    ("measure", max(1.0, measure_seconds)),
+                )
+                for phase, total in phases:
+                    started = time.monotonic()
+                    while True:
+                        elapsed = time.monotonic() - started
+                        if progress:
+                            progress(phase, min(elapsed, total), total)
+                        if elapsed >= total:
+                            break
+                        time.sleep(0.15)
+
+                alcohol_mvs = random.uniform(config.MOCK_ALCOHOL_MIN, config.MOCK_ALCOHOL_MAX)
+                cannabis_mvs = random.uniform(config.MOCK_CANNABIS_MIN, config.MOCK_CANNABIS_MAX)
+                peak_ms = int((config.PURGE_SECONDS + config.BASELINE_SECONDS
+                               + measure_seconds * random.uniform(0.3, 0.7)) * 1000)
+                return CycleResult(
+                    alcohol=ChannelResult(
+                        baseline=round(random.uniform(300, 1500), 1),        # nA
+                        peak=round(alcohol_mvs * 250, 1),                    # nA
+                        peak_t_ms=peak_ms,
+                        integral_mvs=round(alcohol_mvs, 3),
+                    ),
+                    cannabis=ChannelResult(
+                        baseline=round(random.uniform(400, 800), 1),         # codes
+                        peak=round(cannabis_mvs * 40, 1),                    # codes
+                        peak_t_ms=peak_ms,
+                        integral_mvs=round(cannabis_mvs, 3),
+                    ),
+                )
+            finally:
+                self.state = "ready"
 
 
 class SpiBreathAnalyzer(BreathAnalyzer):
@@ -85,117 +169,203 @@ class SpiBreathAnalyzer(BreathAnalyzer):
 
     def __init__(self, periphery_module: Optional[Any] = None) -> None:
         self.periphery = periphery_module or importlib.import_module("periphery")
-        warnings = []
-        if config.ALCOHOL_SOURCE != "adc":
-            warnings.append(
-                "Alcohol readings are placeholder values until the alcohol "
-                "conversion is calibrated (HH_ALCOHOL_SOURCE=adc)."
-            )
-        warnings.append(
-            "Cannabis shows the raw PID ADC value (no ppb conversion yet)."
+        self._lock = threading.Lock()
+        self.startup_warnings = (
+            "Readings are uncalibrated integrals (mV*s) — set limits after calibration.",
         )
-        self.startup_warnings = tuple(warnings)
+        self.last_stabilize: dict[str, Any] = {}
 
-    def _exchange(self, spi: Any, cmd: int) -> tuple[Optional[list[tuple[int, int, int]]], Optional[str]]:
+        # Open once; the board stays powered between cycles so the STM32
+        # keeps its boot-time zero-offset calibration. "high" = atomic
+        # output-HIGH request (plain "out" would blip the line LOW and
+        # reset the STM32).
+        self.trigger = self.periphery.GPIO(config.GPIO_CHIP, config.BOARD_ENABLE_GPIO, "high")
+        self.ready = self.periphery.GPIO(config.GPIO_CHIP, config.READY_GPIO, "in", edge="falling")
+        self.pump = self.periphery.GPIO(config.GPIO_CHIP, config.PUMP_GPIO, "out")
+        self.spi = self.periphery.SPI(config.SPI_DEVICE, config.SPI_MODE, config.SPI_SPEED_HZ)
+        self.pump.write(False)
+
+    # ---- frame layer -----------------------------------------------------
+
+    def _exchange(self, cmd: int) -> tuple[Optional[list[tuple[int, int, int]]], Optional[str]]:
         tx = [cmd] + [0x00] * (FRAME_MAX - 1)
-        rx = bytes(spi.transfer(tx))  # ONE full-duplex 246-byte transfer
+        rx = bytes(self.spi.transfer(tx))   # ONE full-duplex 246-byte transfer
         if rx[0] != 0xAA or rx[1] != 0x55:
             return None, f"bad header {rx[0]:02X} {rx[1]:02X}"
         if crc16_ccitt(rx[:-2]) != (rx[-2] << 8) | rx[-1]:
             return None, "bad CRC"
         records = []
         for i in range(min(rx[2], MAX_RECORDS)):
-            # SensorRecord: uint32 tick, uint16 src, 2 pad, int32 val (little-endian)
+            # SensorRecord: uint32 tick(ms), uint16 src, 2 pad, int32 val (LE)
             records.append(struct.unpack_from("<IH2xi", rx, 4 + i * RECORD_SIZE))
         return records, None
 
-    def _aggregate(self, samples: list[int]) -> float:
-        if config.SAMPLE_AGGREGATION == "peak":
-            return float(max(samples))
-        if config.SAMPLE_AGGREGATION == "last":
-            return float(samples[-1])
-        return sum(samples) / len(samples)
+    def _wait_frame(self, cmd: int = CMD_NONE) -> tuple[Optional[list[tuple[int, int, int]]], bool]:
+        """Block for the next doorbell, exchange one frame carrying `cmd`.
+        Returns (records, delivered). On a corrupt frame the STM32 may or may
+        not have latched the command — treated as NOT delivered (commands are
+        idempotent, so re-sending is safe)."""
+        if self.ready.read():   # idle high: wait for a falling edge
+            if not self.ready.poll(config.DOORBELL_TIMEOUT_SECONDS):
+                return None, False
+            self.ready.read_event()
+        records, error = self._exchange(cmd)
+        while not self.ready.read():   # let the STM32 deassert
+            time.sleep(0.001)
+        if error:
+            return None, False
+        return records, True
 
-    def _alcohol_bac(self, raw_value: float) -> float:
-        if config.ALCOHOL_SOURCE == "adc":
-            return max(0.0, raw_value * config.ALCOHOL_SCALE + config.ALCOHOL_OFFSET)
-        return round(random.uniform(0.0, 10.0), 1)
+    def _send_commands(self, commands: list[int], max_tries: int = 15) -> bool:
+        """Deliver each command on its own frame, retrying on frame errors.
+        Gives up after max_tries frames so a dead link can't hang teardown."""
+        pending = list(commands)
+        tries = 0
+        while pending and tries < max_tries:
+            tries += 1
+            _records, delivered = self._wait_frame(pending[0])
+            if delivered:
+                pending.pop(0)
+        return not pending
 
-    def read(self, seconds: float) -> Reading:
-        trigger = None
-        ready = None
-        spi = None
-        samples: list[int] = []
-        last_error: Optional[str] = None
-        sent_startup = False
-        try:
-            trigger = self.periphery.GPIO(config.GPIO_CHIP, config.BOARD_ENABLE_GPIO, "out")
-            ready = self.periphery.GPIO(config.GPIO_CHIP, config.READY_GPIO, "in", edge="falling")
-            spi = self.periphery.SPI(config.SPI_DEVICE, config.SPI_MODE, config.SPI_SPEED_HZ)
+    # ---- stabilize (app-start priming) -----------------------------------
 
-            trigger.write(False)
-            time.sleep(0.01)
-            trigger.write(True)
-
-            deadline = time.monotonic() + max(1.0, seconds)
-            while time.monotonic() < deadline:
-                if ready.read():  # idle high: wait for a falling edge
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    if not ready.poll(min(remaining, config.DOORBELL_TIMEOUT_SECONDS)):
+    def stabilize(self) -> None:
+        with self._lock:
+            self.state = "stabilizing"
+            samples: list[tuple[int, int]] = []   # (stm32_ms, nA)
+            settled = False
+            started = time.time()
+            try:
+                self.pump.write(False)   # priming happens in still air
+                self._send_commands([CMD_PID_SHUTDOWN, CMD_AFE_STARTUP])
+                last_eval = 0.0
+                ok_streak = 0
+                while time.time() - started < config.STABILIZE_MAX_S:
+                    records, _ = self._wait_frame()
+                    if records is None:
                         continue
-                    ready.read_event()
-                # must exchange within 100 ms of the edge
-                records, error = self._exchange(spi, CMD_NONE if sent_startup else CMD_PID_STARTUP)
-                sent_startup = True
-                if error:
-                    last_error = error
-                else:
-                    for _tick, source, value in records:
-                        if config.PID_SOURCE in (0, source):
-                            samples.append(value)
-                # let the STM32 deassert before the next wait
-                release_deadline = time.monotonic() + 0.5
-                while not ready.read() and time.monotonic() < release_deadline:
-                    time.sleep(0.001)
+                    for tick, source, value in records:
+                        if source == SRC_AD5941:
+                            samples.append((tick, value))
+                    if not samples or time.time() - last_eval < 1.0:
+                        continue
+                    last_eval = time.time()
+                    t_now = samples[-1][0]
+                    window = [s for s in samples if t_now - s[0] <= config.SETTLE_WINDOW_MS]
+                    if len(window) < 8 or (t_now - window[0][0]) < config.SETTLE_WINDOW_MS * 0.8:
+                        continue
+                    mid = (t_now + window[0][0]) / 2.0
+                    first = [v for t, v in window if t <= mid]
+                    second = [v for t, v in window if t > mid]
+                    if not first or not second:
+                        continue
+                    slope = ((sum(second) / len(second)) - (sum(first) / len(first))) \
+                        / (config.SETTLE_WINDOW_MS / 2000.0)   # nA/s
+                    if abs(slope) <= config.SETTLE_SLOPE_NA_S:
+                        ok_streak += 1
+                        if ok_streak >= 2:
+                            settled = True
+                            break
+                    else:
+                        ok_streak = 0
+            except Exception:
+                pass
+            finally:
+                # Stop sampling; the LP loop keeps the cell biased (virtual short).
+                try:
+                    self._send_commands([CMD_AFE_SHUTDOWN])
+                    self.pump.write(False)
+                except Exception:
+                    pass
+                self.last_stabilize = {
+                    "settled": settled,
+                    "final_ua": round(samples[-1][1] / 1000.0, 3) if samples else None,
+                    "elapsed_s": round(time.time() - started, 1),
+                }
+                self.state = "ready"
 
-            if not samples:
-                detail = f" (last frame error: {last_error})" if last_error else ""
-                raise RuntimeError(f"No PID samples received from the breath board{detail}")
+    # ---- measurement cycle ------------------------------------------------
 
-            aggregated = self._aggregate(samples)
-            return Reading(
-                alcohol_bac=round(self._alcohol_bac(aggregated), 1),
-                cannabis_raw=round(aggregated, 1),
+    def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
+        with self._lock:
+            self.state = "measuring"
+            purge_ms = config.PURGE_SECONDS * 1000.0
+            baseline_ms = config.BASELINE_SECONDS * 1000.0
+            measure_ms = max(1.0, measure_seconds) * 1000.0
+            total_ms = purge_ms + baseline_ms + measure_ms
+
+            stats = {s: {"base": [], "baseline": None, "integ": 0.0,
+                         "peak": 0.0, "peak_t": 0, "prev": None, "stable": True}
+                     for s in (SRC_AD7798, SRC_AD5941)}
+            t0: Optional[int] = None   # STM32 tick of first AD5941 sample
+            wall_deadline = time.monotonic() + total_ms / 1000.0 + 30.0
+            try:
+                self.pump.write(True)   # active high
+                self._send_commands([CMD_PID_STARTUP, CMD_AFE_STARTUP])
+
+                while True:
+                    if time.monotonic() > wall_deadline:
+                        raise RuntimeError("sensor board stopped responding mid-cycle")
+                    records, _ = self._wait_frame()
+                    if records is None:
+                        continue
+                    for tick, source, value in records:
+                        if t0 is None and source == SRC_AD5941:
+                            t0 = tick   # anchor on first alcohol sample
+                        if source not in stats or t0 is None or tick < t0:
+                            continue
+                        dt = tick - t0
+                        if dt >= total_ms:   # cycle complete
+                            return self._build_result(stats)
+                        channel = stats[source]
+                        if dt < purge_ms:
+                            phase, elapsed, total = "purge", dt / 1000.0, purge_ms / 1000.0
+                        elif dt < purge_ms + baseline_ms:
+                            phase = "baseline"
+                            elapsed, total = (dt - purge_ms) / 1000.0, baseline_ms / 1000.0
+                            channel["base"].append(value)
+                        else:
+                            phase = "measure"
+                            elapsed, total = (dt - purge_ms - baseline_ms) / 1000.0, measure_ms / 1000.0
+                            if channel["baseline"] is None and channel["base"]:
+                                channel["baseline"] = sum(channel["base"]) / float(len(channel["base"]))
+                                spread = max(channel["base"]) - min(channel["base"])
+                                channel["stable"] = spread <= BASELINE_SPREAD_WARN[source]
+                            if channel["baseline"] is not None:
+                                delta = value - channel["baseline"]
+                                if channel["prev"] is not None:
+                                    prev_t, prev_d = channel["prev"]
+                                    channel["integ"] += (delta + prev_d) / 2.0 * (tick - prev_t)
+                                if delta > channel["peak"]:
+                                    channel["peak"], channel["peak_t"] = delta, dt
+                                channel["prev"] = (tick, delta)
+                        if progress:
+                            progress(phase, elapsed, total)
+            finally:
+                # Sensors off first (needs live frames), then pump.
+                try:
+                    self._send_commands([CMD_AFE_SHUTDOWN, CMD_PID_SHUTDOWN])
+                except Exception:
+                    pass
+                try:
+                    self.pump.write(False)
+                except Exception:
+                    pass
+                self.state = "ready"
+
+    def _build_result(self, stats: dict) -> CycleResult:
+        def channel(source: int) -> ChannelResult:
+            data = stats[source]
+            baseline = data["baseline"] if data["baseline"] is not None else 0.0
+            return ChannelResult(
+                baseline=_finite(round(baseline, 1)),
+                peak=_finite(round(data["peak"], 1)),
+                peak_t_ms=int(data["peak_t"]),
+                integral_mvs=_finite(round(_mvs(source, data["integ"]), 3)),
+                stable=bool(data["stable"]),
             )
-        except Exception as exc:
-            raise RuntimeError(f"Breath sensor read failed: {exc}") from exc
-        finally:
-            if spi is not None and sent_startup:
-                try:
-                    if ready is not None and ready.read() and ready.poll(2.0):
-                        ready.read_event()
-                    self._exchange(spi, CMD_PID_SHUTDOWN)
-                except Exception:
-                    pass
-            for resource in (spi,):
-                if resource is not None:
-                    try:
-                        resource.close()
-                    except Exception:
-                        pass
-            if trigger is not None:
-                try:
-                    trigger.write(False)
-                    trigger.close()
-                except Exception:
-                    pass
-            if ready is not None:
-                try:
-                    ready.close()
-                except Exception:
-                    pass
+        return CycleResult(alcohol=channel(SRC_AD5941), cannabis=channel(SRC_AD7798))
 
 
 def resolve_analyzer() -> BreathAnalyzer:
