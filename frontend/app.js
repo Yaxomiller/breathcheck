@@ -120,7 +120,8 @@ async function refreshStatus() {
     $("#chip-set").textContent = `SET ${status.set_no || "--"}`;
     $("#chip-records").textContent = `${status.records} RECORD${status.records === 1 ? "" : "S"}`;
     $("#chip-sensor").textContent =
-      status.sensor_state === "stabilizing" ? "SENSOR WARM-UP"
+      status.stream_ok === false ? "SENSOR OFFLINE"
+        : status.sensor_state === "stabilizing" ? "SENSOR WARM-UP"
         : status.analyzer === "spi" ? "SENSOR LIVE" : "SENSOR DEMO";
   } catch (err) { /* backend not ready yet */ }
 }
@@ -196,9 +197,13 @@ async function refreshScanReadyStatus() {
     const status = await api("/api/status");
     const warming = status.sensor_state === "stabilizing";
     const measuring = status.sensor_state === "measuring";
+    const offline = status.stream_ok === false;
     const button = $("#btn-start-scan");
-    button.disabled = warming || measuring;
-    if (warming) {
+    button.disabled = warming || measuring || offline;
+    if (offline) {
+      button.textContent = "SENSOR OFFLINE";
+      $("#scan-ready-hint").textContent = "NO SIGNAL FROM SENSOR — RECONNECTING, PLEASE WAIT";
+    } else if (warming) {
       const elapsed = Math.max(0, Math.floor(Number(status.stabilize?.elapsed_s) || 0));
       button.textContent = `WARM-UP ${elapsed}s`;
       $("#scan-ready-hint").textContent = "INITIAL SENSOR WARM-UP — PLEASE WAIT";
@@ -252,6 +257,11 @@ const PHASE_UI = {
     hint: "STARTING SENSOR — PLEASE WAIT",
     timed: false,
   },
+  recovering: {
+    label: "RESET",
+    hint: "SENSOR RESTARTING — PLEASE WAIT",
+    timed: false,
+  },
   purge: {
     label: "STABILIZE",
     hint: "SENSOR STABILIZING — DO NOT BLOW YET",
@@ -275,6 +285,7 @@ function trackCycle(session) {
   const circumference = 2 * Math.PI * 96;
   let lastPhase = "";
   let lastCount = -1;
+  let phaseStartedAt = Date.now();
   let photoTaken = false;
   let polling = false;
   let pollFailures = 0;
@@ -285,6 +296,7 @@ function trackCycle(session) {
     if (phase !== lastPhase) {
       lastPhase = phase;
       lastCount = -1;
+      phaseStartedAt = Date.now();
       $("#ring-label").textContent = phaseUi.label;
       $("#scan-phase-hint").textContent = phaseUi.hint;
       ring.classList.toggle("prep", !isMeasure);
@@ -292,8 +304,10 @@ function trackCycle(session) {
       beep(isMeasure ? 990 : 660, 120);
     }
     if (phaseUi.timed === false) {
+      // No fixed duration — count UP so the screen never looks frozen.
       ring.style.strokeDashoffset = "0";
-      $("#ring-count").textContent = "…";
+      const waited = Math.floor((Date.now() - phaseStartedAt) / 1000);
+      $("#ring-count").textContent = waited >= 1 ? String(waited) : "…";
       return;
     }
     ring.style.strokeDashoffset = String(circumference * Math.min(1, elapsed / total));

@@ -29,7 +29,7 @@ def _float(name: str, default: float) -> float:
 
 
 APP_NAME = "BreathCheck"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.3"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(_str("HH_DATA_DIR", str(BASE_DIR / "data")))
@@ -58,6 +58,11 @@ BOARD_ENABLE_GPIO = _int("HH_BOARD_ENABLE_GPIO", 256)   # BRD_ON, PI0 pin 26
 READY_GPIO = _int("HH_READY_GPIO", 257)                 # doorbell, PI1 pin 32
 PUMP_GPIO = _int("HH_PUMP_GPIO", 271)                   # air pump, PI15, ACTIVE HIGH
 DOORBELL_TIMEOUT_SECONDS = _float("HH_DOORBELL_TIMEOUT_SECONDS", 5.0)
+BOARD_RESET_SECONDS = _float("HH_BOARD_RESET_SECONDS", 0.1)
+BOARD_BOOT_SECONDS = _float("HH_BOARD_BOOT_SECONDS", 1.0)
+# Idle keepalive: after this long without a valid frame the board is reset
+# and AFE sampling restarted in the background.
+STREAM_DEAD_SECONDS = _float("HH_STREAM_DEAD_SECONDS", 10.0)
 
 # Unit conversion — keep in sync with the STM32 firmware.
 RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)

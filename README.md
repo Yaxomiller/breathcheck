@@ -50,10 +50,13 @@ HH_BOARD_ENABLE_GPIO=256         # BRD_ON, PI0 pin 26 (opened atomically HIGH)
 HH_READY_GPIO=257                # doorbell, PI1 pin 32 (idle HIGH / active LOW)
 HH_PUMP_GPIO=271                 # air pump, PI15, ACTIVE HIGH
 HH_RTIA_KOHM=4.0                 # AD5941 LPTIA Rtia — keep in sync with firmware
+HH_BOARD_RESET_SECONDS=0.1       # BRD_ON low pulse at backend startup/recovery
+HH_BOARD_BOOT_SECONDS=1.0        # wait after BRD_ON returns high
 HH_PURGE_SECONDS=15              # pump-on purge before baseline
 HH_BASELINE_SECONDS=5            # fresh-air zero window
 HH_SETTLE_SLOPE_NA_S=30          # app-start stabilize: settled drift threshold
 HH_STABILIZE_MAX_S=180
+HH_STREAM_DEAD_SECONDS=10        # idle keepalive: auto-reset after this silence
 
 # NMEA serial GPS (requires: pip install pyserial)
 HH_GPS_MODE=nmea
@@ -61,10 +64,11 @@ HH_GPS_SERIAL_PORT=/dev/ttyS0
 HH_GPS_SERIAL_BAUD=9600
 ```
 
-Board protocol (doorbell/frame): the board is powered once via BRD_ON
-(requested atomically HIGH so the STM32 is never reset by a power blip) and
-stays on between tests — the firmware's zero-offset calibration runs at its
-boot. Each doorbell falling edge is answered within 100 ms by one full-duplex
+Board protocol (doorbell/frame): BRD_ON is requested atomically HIGH and then
+pulsed LOW once at backend startup (or automatically after a lost frame stream)
+so the STM32 always begins in a known state. The firmware's zero-offset
+calibration runs at its boot. Each doorbell falling edge is answered within
+100 ms by one full-duplex
 246-byte transfer (header `AA 55` + record count, 20 records x 12 bytes
 `uint32 tick_ms, uint16 src, 2 pad, int32 val` little-endian, CRC16-CCITT).
 Commands ride on frame byte 0: `0xA0/0xA1` PID on/off, `0xB0/0xB1` alcohol
@@ -81,7 +85,12 @@ linearity as the integral of output), with peak deltas stored alongside
 shut down while alcohol AFE sampling remains on so its doorbell frames can
 carry the next START command. The alcohol cell still idles virtually shorted
 (biased at 0 V) — a 2-lead fuel cell must be stored shorted or it polarizes
-and drifts.
+and drifts. Between cycles a backend keepalive thread answers every idle
+doorbell (the 100 ms answer window applies at all times — an unanswered
+stream desyncs the STM32 and made the first scan after idle fail); if no
+valid frame arrives for `HH_STREAM_DEAD_SECONDS` it resets the board and
+restarts AFE sampling by itself, and the UI shows SENSOR OFFLINE until the
+stream is back.
 
 At app start the backend runs a **stabilize pass** (pump off, PID off, AFE
 sampling on) until the alcohol baseline drift stays under 30 nA/s, then leaves

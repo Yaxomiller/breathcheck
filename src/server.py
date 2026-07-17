@@ -143,6 +143,7 @@ def status() -> dict[str, Any]:
         "counter": int(settings.get("counter", "0")),
         "set_no": settings.get("set_no", ""),
         "sensor_state": _analyzer.state,
+        "stream_ok": bool(getattr(_analyzer, "stream_ok", True)),
         "stabilize": stabilize,
         "purge_seconds": config.PURGE_SECONDS,
         "baseline_seconds": config.BASELINE_SECONDS,
@@ -208,6 +209,8 @@ def scan_start() -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="SENSOR WARMING UP — TRY AGAIN SOON")
     if _analyzer.state == "measuring":
         raise HTTPException(status_code=409, detail="TEST ALREADY RUNNING")
+    if not getattr(_analyzer, "stream_ok", True):
+        raise HTTPException(status_code=409, detail="NO SIGNAL FROM SENSOR — RECONNECTING, TRY AGAIN SHORTLY")
 
     settings = db.get_settings()
     seconds = max(3, int(float(settings.get("scan_seconds", "10"))))

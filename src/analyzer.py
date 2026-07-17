@@ -18,6 +18,12 @@ Measurement cycle, timed in the STM32 tick domain (immune to host latency):
             whose deployed firmware has no idle SYS keepalive, continues to
             provide doorbell frames that can carry the next START command.
             The alcohol cell remains virtually shorted at 0 V.
+            A background keepalive thread answers every idle doorbell within
+            the 100 ms protocol window — an unanswered stream desyncs the
+            STM32 SPI slave and made the FIRST scan after idle fail with
+            "no frames from sensor". If no valid frame arrives for
+            STREAM_DEAD_SECONDS the keepalive resets the board and restarts
+            AFE sampling by itself, so START always lands on a live stream.
 
 Sources:  1 = AD7798 (PID / cannabis, ADC codes, 19.073 uV/LSB)
           2 = AD5941 (alcohol fuel cell, nA; V = I * Rtia at Rtia = 4k)
@@ -67,7 +73,7 @@ BASELINE_SPREAD_WARN = {SRC_AD5941: 200,   # nA
                         SRC_AD7798: 300}   # codes (PID drifts during warm-up)
 
 # progress(phase, elapsed_seconds, total_seconds);
-# phase: starting|purge|baseline|measure
+# phase: starting|recovering|purge|baseline|measure
 ProgressFn = Callable[[str, float, float], None]
 
 
@@ -110,6 +116,7 @@ class BreathAnalyzer:
     name = "base"
     startup_warnings: tuple[str, ...] = ()
     state = "ready"   # ready | stabilizing | measuring | error
+    stream_ok = True  # False while the doorbell/frame stream is dead
 
     def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
         raise NotImplementedError
@@ -178,17 +185,27 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         self.last_stabilize: dict[str, Any] = {}
         self.stabilize_started_at: Optional[float] = None
 
-        # Open once; the board stays powered between cycles so the STM32
-        # keeps its boot-time zero-offset calibration. "high" = atomic
-        # output-HIGH request (plain "out" would blip the line LOW and
-        # reset the STM32).
+        # Request BRD_ON atomically high, open the bus, then perform one
+        # deliberate reset so every backend start begins from a known STM32
+        # state. The stabilize pass below rebuilds its zero/baseline state.
         self.trigger = self.periphery.GPIO(config.GPIO_CHIP, config.BOARD_ENABLE_GPIO, "high")
         self.ready = self.periphery.GPIO(config.GPIO_CHIP, config.READY_GPIO, "in", edge="falling")
         self.pump = self.periphery.GPIO(config.GPIO_CHIP, config.PUMP_GPIO, "out")
         self.spi = self.periphery.SPI(config.SPI_DEVICE, config.SPI_MODE, config.SPI_SPEED_HZ)
         self.pump.write(False)
+        self._reset_board()
+        self._last_frame_at = time.monotonic()
+        threading.Thread(target=self._keepalive_loop, daemon=True).start()
 
     # ---- frame layer -----------------------------------------------------
+
+    def _reset_board(self) -> None:
+        """Reset the STM32/AFE and wait briefly for its boot sequence."""
+        self.pump.write(False)
+        self.trigger.write(False)
+        time.sleep(config.BOARD_RESET_SECONDS)
+        self.trigger.write(True)
+        time.sleep(config.BOARD_BOOT_SECONDS)
 
     def _exchange(self, cmd: int) -> tuple[Optional[list[tuple[int, int, int]]], Optional[str]]:
         tx = [cmd] + [0x00] * (FRAME_MAX - 1)
@@ -203,34 +220,81 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             records.append(struct.unpack_from("<IH2xi", rx, 4 + i * RECORD_SIZE))
         return records, None
 
-    def _wait_frame(self, cmd: int = CMD_NONE) -> tuple[Optional[list[tuple[int, int, int]]], bool]:
+    def _wait_frame(self, cmd: int = CMD_NONE,
+                    timeout: Optional[float] = None) -> tuple[Optional[list[tuple[int, int, int]]], bool]:
         """Block for the next doorbell, exchange one frame carrying `cmd`.
         Returns (records, delivered). On a corrupt frame the STM32 may or may
         not have latched the command — treated as NOT delivered (commands are
         idempotent, so re-sending is safe)."""
+        if timeout is None:
+            timeout = config.DOORBELL_TIMEOUT_SECONDS
         if self.ready.read():   # idle high: wait for a falling edge
-            if not self.ready.poll(config.DOORBELL_TIMEOUT_SECONDS):
-                return None, False
-            self.ready.read_event()
+            # Drop stale queued edges first — answering a doorbell whose
+            # 100 ms window has passed exchanges garbage with the STM32.
+            while self.ready.poll(0):
+                self.ready.read_event()
+            if self.ready.read():
+                if not self.ready.poll(timeout):
+                    return None, False
+                self.ready.read_event()
         records, error = self._exchange(cmd)
+        if error is None:
+            self._last_frame_at = time.monotonic()
+            self.stream_ok = True
+        deadline = time.monotonic() + 1.0
         while not self.ready.read():   # let the STM32 deassert
+            if time.monotonic() >= deadline:
+                return None, False     # wedged low — do not spin forever
             time.sleep(0.001)
         if error:
             return None, False
         return records, True
 
-    def _send_commands(self, commands: list[int], max_tries: int = 15) -> bool:
+    def _send_commands(self, commands: list[int], max_tries: int = 15,
+                       timeout: Optional[float] = None) -> bool:
         """Deliver each command on its own frame, retrying on frame errors.
         Each command gets its own retry budget: a slow PID start must not use
         all the attempts before the alcohol AFE start command is sent."""
         for command in commands:
             for _attempt in range(max_tries):
-                _records, delivered = self._wait_frame(command)
+                _records, delivered = self._wait_frame(command, timeout=timeout)
                 if delivered:
                     break
             else:
                 return False
         return True
+
+    # ---- idle keepalive ---------------------------------------------------
+
+    def _keepalive_loop(self) -> None:
+        """Answer doorbells between cycles.
+
+        The protocol obliges the host to answer every doorbell within 100 ms.
+        stabilize()/run_cycle() honour that while they hold the lock; this
+        thread covers the idle gaps so the frame stream never desyncs, and
+        revives the board on its own if the stream goes quiet."""
+        while True:
+            time.sleep(0.02)
+            if not self._lock.acquire(timeout=1.0):
+                continue   # a cycle owns the bus and is servicing doorbells
+            try:
+                if self.state != "ready":
+                    continue
+                self._wait_frame(timeout=0.25)
+                if time.monotonic() - self._last_frame_at > config.STREAM_DEAD_SECONDS:
+                    self._recover_stream()
+            except Exception:
+                pass   # never let the keepalive die; next pass retries
+            finally:
+                self._lock.release()
+
+    def _recover_stream(self) -> None:
+        """Reset a silent board and restart AFE sampling in the background,
+        so the next scan starts on a live doorbell instead of failing."""
+        self._reset_board()
+        self.stream_ok = self._send_commands(
+            [CMD_PID_SHUTDOWN, CMD_AFE_STARTUP], max_tries=8, timeout=0.5)
+        self._last_frame_at = time.monotonic()
 
     # ---- stabilize (app-start priming) -----------------------------------
 
@@ -240,10 +304,17 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             self.stabilize_started_at = time.time()
             samples: list[tuple[int, int]] = []   # (stm32_ms, nA)
             settled = False
+            recovered = False
+            error: Optional[str] = None
             started = self.stabilize_started_at
             try:
                 self.pump.write(False)   # priming happens in still air
-                self._send_commands([CMD_PID_SHUTDOWN, CMD_AFE_STARTUP])
+                startup_commands = [CMD_PID_SHUTDOWN, CMD_AFE_STARTUP]
+                if not self._send_commands(startup_commands, max_tries=3):
+                    recovered = True
+                    self._reset_board()
+                    if not self._send_commands(startup_commands):
+                        raise RuntimeError("sensor board produced no frames after hardware reset")
                 last_eval = 0.0
                 ok_streak = 0
                 while time.time() - started < config.STABILIZE_MAX_S:
@@ -274,8 +345,8 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                             break
                     else:
                         ok_streak = 0
-            except Exception:
-                pass
+            except Exception as exc:
+                error = str(exc)
             finally:
                 # Keep AFE sampling alive between tests. The deployed board
                 # does not emit the documented SYS keepalive while both
@@ -289,7 +360,10 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     "settled": settled,
                     "final_ua": round(samples[-1][1] / 1000.0, 3) if samples else None,
                     "elapsed_s": round(time.time() - started, 1),
+                    "hardware_reset": recovered,
                 }
+                if error:
+                    self.last_stabilize["error"] = error
                 self.stabilize_started_at = None
                 self.state = "ready"
 
@@ -311,8 +385,15 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 if progress:
                     progress("starting", 0.0, 0.0)
                 self.pump.write(True)   # active high
-                if not self._send_commands([CMD_PID_STARTUP, CMD_AFE_STARTUP]):
-                    raise RuntimeError("sensor board produced no frame for startup commands")
+                startup_commands = [CMD_PID_STARTUP, CMD_AFE_STARTUP]
+                if not self._send_commands(startup_commands, max_tries=3):
+                    # Recover a board whose frame stream stopped unexpectedly.
+                    if progress:
+                        progress("recovering", 0.0, 0.0)
+                    self._reset_board()
+                    self.pump.write(True)
+                    if not self._send_commands(startup_commands):
+                        raise RuntimeError("sensor board produced no frames after hardware reset")
 
                 # Command delivery can legitimately take a few seconds while
                 # the board wakes. Do not charge that time to the measurement
