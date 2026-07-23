@@ -87,14 +87,26 @@ MOCK_CANNABIS_MAX = _float("HH_MOCK_CANNABIS_MAX", 6.0)
 
 # --- Camera (server-side exhale-photo capture) ------------------------------
 # Chromium's getUserMedia cannot drive this board's MIPI/CSI camera (the
-# sunxi-vin driver exposes several /dev/videoN pipeline nodes that never
-# negotiate a browser-usable stream), so the exhale photo is grabbed directly
-# from the video device with ffmpeg during the scan instead.
-# Leave HH_CAMERA_DEVICE blank to auto-probe every /dev/video* node once and
-# cache whichever produces a real JPEG; set it (e.g. /dev/video0) to skip
-# probing once you know which node works.
+# Allwinner sunxi-vin driver exposes several /dev/videoN pipeline nodes that
+# never negotiate a browser-usable stream), so the exhale photo is grabbed
+# server-side during the scan instead.
+#
+# The Allwinner sensor only delivers frames through GStreamer's patched
+# v4l2src with the ISP flags `en-awisp=1 en-largemode=0` (this is what the
+# sibling attendance project uses). We shell out to gst-launch-1.0 with that
+# pipeline; if GStreamer/ISP isn't available we fall back to a plain ffmpeg
+# grab (works for ordinary USB/UVC webcams).
+#
+# Leave HH_CAMERA_DEVICE blank to auto-probe /dev/video* (video0 first) and
+# cache whichever node yields a real JPEG; set it (e.g. /dev/video0) to skip
+# probing.
 CAMERA_DEVICE = _str("HH_CAMERA_DEVICE", "")
-CAMERA_TIMEOUT_SECONDS = _float("HH_CAMERA_TIMEOUT_SECONDS", 3.0)
+CAMERA_WIDTH = _int("HH_CAMERA_WIDTH", 1280)
+CAMERA_HEIGHT = _int("HH_CAMERA_HEIGHT", 720)
+CAMERA_WARMUP_FRAMES = _int("HH_CAMERA_WARMUP_FRAMES", 12)   # let the ISP AE settle
+CAMERA_JPEG_QUALITY = _int("HH_CAMERA_JPEG_QUALITY", 85)
+CAMERA_TIMEOUT_SECONDS = _float("HH_CAMERA_TIMEOUT_SECONDS", 12.0)  # ISP init is slow
+CAMERA_PIPELINE = _str("HH_CAMERA_PIPELINE", "")   # full gst pipeline override
 
 # --- GPS --------------------------------------------------------------------
 # "mock" on a PC, "nmea" with a serial GPS module, "off" to disable.

@@ -27,8 +27,12 @@ apt-get install -y chromium || apt-get install -y chromium-browser \
   || echo "WARN: no chromium package found — install a Chromium browser manually for the kiosk"
 apt-get install -y unclutter || true   # hides the mouse cursor on the touchscreen
 # Exhale-photo capture: the browser can't drive this board's MIPI/CSI camera,
-# so the backend grabs frames itself with ffmpeg (src/camera.py).
-apt-get install -y ffmpeg || echo "WARN: ffmpeg not installed — exhale photos will be skipped"
+# so the backend grabs frames itself (src/camera.py). The Allwinner sensor
+# only streams through GStreamer's ISP-enabled v4l2src; ffmpeg is a fallback
+# for ordinary USB/UVC webcams.
+apt-get install -y gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  || echo "WARN: GStreamer not installed — MIPI camera photos will be skipped"
+apt-get install -y ffmpeg || echo "WARN: ffmpeg not installed — USB-camera photo fallback unavailable"
 
 echo "==> Python environment"
 python3 -m venv "$VENV"
