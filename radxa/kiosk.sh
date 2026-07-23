@@ -44,6 +44,10 @@ fi
 # --use-fake-ui-for-media-stream auto-grants the camera permission so the
 # exhale photo works unattended (no permission popup on a kiosk).
 # --incognito: never serve a stale cached frontend after an app update.
+# --disable-gpu / --disable-gpu-compositing: this board's DRM/GBM driver
+# can't satisfy Chromium's hardware buffer allocation (gbm_wrapper
+# "Failed to export buffer to dma_buf" errors) — render in software instead,
+# which is plenty fast for this plain HTML/CSS kiosk UI.
 exec "$BROWSER" \
   --kiosk "$URL" \
   --incognito \
@@ -55,4 +59,7 @@ exec "$BROWSER" \
   --autoplay-policy=no-user-gesture-required \
   --check-for-update-interval=31536000 \
   --overscroll-history-navigation=0 \
-  --pull-to-refresh=0
+  --pull-to-refresh=0 \
+  --disable-gpu \
+  --disable-gpu-compositing \
+  --disable-dev-shm-usage
