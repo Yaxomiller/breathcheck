@@ -3,6 +3,7 @@
   python app.py            start the server and open the kiosk browser
   python app.py serve      server only (for development / remote browser)
   python app.py kiosk      server + fullscreen kiosk browser window
+  python app.py term       text UI over SSH — no browser (alias: cli, simple)
 
 Options:
   --port 8000              override the web port
@@ -41,10 +42,18 @@ def _open_kiosk(url: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="BreathCheck handheld analyzer")
-    parser.add_argument("mode", nargs="?", default="kiosk", choices=["kiosk", "serve", "web"])
+    parser.add_argument(
+        "mode", nargs="?", default="kiosk",
+        choices=["kiosk", "serve", "web", "term", "cli", "simple"],
+    )
     parser.add_argument("--host", default=config.WEB_HOST)
     parser.add_argument("--port", type=int, default=config.WEB_PORT)
     args = parser.parse_args()
+
+    if args.mode in ("term", "cli", "simple"):
+        from src import terminal
+        terminal.run()
+        return
 
     db.init_db()
 

@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src import analyzer as analyzer_module
-from src import config, db, device
+from src import config, db, device, scan
 from src.gps import GpsProvider
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
@@ -166,55 +166,7 @@ def _run_scan(session_id: str, measure_seconds: float) -> None:
     try:
         cycle = _analyzer.run_cycle(measure_seconds, progress)
         settings = db.get_settings()
-        alcohol_limit = float(settings.get("alcohol_limit", config.DEFAULT_ALCOHOL_LIMIT))
-        cannabis_limit = float(settings.get("cannabis_limit", config.DEFAULT_CANNABIS_LIMIT))
-        alcohol_value = cycle.alcohol.integral_mvs
-        cannabis_value = cycle.cannabis.integral_mvs
-        alcohol_flag = "YES" if alcohol_value > alcohol_limit else "NO"
-        cannabis_flag = "YES" if cannabis_value > cannabis_limit else "NO"
-        now = datetime.now()
-        update = {
-            "status": "done",
-            "result": {
-                # Compat keys: alcohol_bac / cannabis_ppb carry the mV*s
-                # integrals of the delta above the fresh-air baseline.
-                "alcohol_bac": alcohol_value,
-                "cannabis_ppb": cannabis_value,
-                # AD5941 in uA, AD7798 in mV.
-                "alcohol_baseline": round(cycle.alcohol.baseline / 1000.0, 3),
-                "alcohol_peak": round(cycle.alcohol.peak / 1000.0, 3),
-                "cannabis_baseline": round(cycle.cannabis.baseline * analyzer_module.PID_MV_PER_LSB, 3),
-                "cannabis_peak": round(cycle.cannabis.peak * analyzer_module.PID_MV_PER_LSB, 3),
-                # TEMPORARY debug fields: sensor-native units (AD5941 nA,
-                # AD7798 ADC codes) shown on the result screen for calibration.
-                "alcohol_baseline_raw": round(cycle.alcohol.baseline, 1),
-                "alcohol_peak_raw": round(cycle.alcohol.peak, 1),
-                "cannabis_baseline_raw": round(cycle.cannabis.baseline, 1),
-                "cannabis_peak_raw": round(cycle.cannabis.peak, 1),
-                "baseline_stable": cycle.alcohol.stable and cycle.cannabis.stable,
-                "alcohol_flag": alcohol_flag,
-                "cannabis_flag": cannabis_flag,
-                "alcohol_limit": alcohol_limit,
-                "cannabis_limit": cannabis_limit,
-                "test_result": "FAIL" if "YES" in (alcohol_flag, cannabis_flag) else "PASS",
-                "test_date": now.strftime("%Y-%m-%d"),
-                "test_time": now.strftime("%H:%M:%S"),
-            },
-        }
-        # TEMPORARY demo override (HH_DEMO_FORCE_CLEAN=1): report clean
-        # regardless of the real reading. The cycle above still ran.
-        if config.DEMO_FORCE_CLEAN:
-            update["result"].update({
-                "alcohol_bac": 0.0, "cannabis_ppb": 0.0,
-                "alcohol_baseline": 0.0, "alcohol_peak": 0.0,
-                "cannabis_baseline": 0.0, "cannabis_peak": 0.0,
-                "alcohol_baseline_raw": 0.0, "alcohol_peak_raw": 0.0,
-                "cannabis_baseline_raw": 0.0, "cannabis_peak_raw": 0.0,
-                "baseline_stable": True,
-                "alcohol_flag": "NO", "cannabis_flag": "NO",
-                "test_result": "PASS",
-                "demo_clean": True,
-            })
+        update = {"status": "done", "result": scan.build_result(cycle, settings)}
     except Exception as exc:
         logger.exception("Scan %s failed", session_id)
         update = {"status": "error", "error": str(exc)}
