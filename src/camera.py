@@ -190,13 +190,15 @@ class CameraStreamer:
                 + ["!", caps, "!", "videorate", "drop-only=true", f"max-rate={fps}", "!"]
                 + scale
                 + convert
-                + ["jpegenc", f"quality={q}", "!", "fdsink", "fd=1"]
+                + ["videoflip", "method=rotate-180", "!",
+                   "jpegenc", f"quality={q}", "!", "fdsink", "fd=1"]
             )
         ffmpeg = shutil.which("ffmpeg")
         if mode == "ffmpeg" and ffmpeg:
             return [ffmpeg, "-nostdin", "-loglevel", "error", "-f", "v4l2",
                     "-video_size", f"{stream_w}x{stream_h}", "-i", device, "-r", str(fps),
-                    "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "5", "-"]
+                    "-vf", "hflip,vflip", "-f", "image2pipe",
+                    "-c:v", "mjpeg", "-q:v", "5", "-"]
         return None
 
     def _wait_for_first_frame(self, proc: subprocess.Popen) -> bool:
