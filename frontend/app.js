@@ -356,6 +356,7 @@ function trackCycle(session) {
 
       if (isMeasure && !photoTaken && elapsed >= session.photo_second) {
         photoTaken = true;
+        // Browser capture (works only where getUserMedia can reach the camera).
         state.photoData = capturePhoto();
         if (state.photoData) {
           $("#flash").classList.remove("go");
@@ -364,6 +365,11 @@ function trackCycle(session) {
           $("#photo-tag").classList.remove("hidden");
           sndShutter();
         }
+      }
+      // On this board the photo comes from the backend — confirm when it lands.
+      if (status.photo_captured && $("#photo-tag").classList.contains("hidden")) {
+        $("#photo-tag").classList.remove("hidden");
+        sndShutter();
       }
     } catch (err) {
       // A single missed status poll is not a sensor failure. Keep the live
