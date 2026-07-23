@@ -343,8 +343,9 @@ async def camera_stream() -> StreamingResponse:
             frame = camera.streamer.latest_jpeg()
             if frame is not None and frame is not last:
                 last = frame
-                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                       + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
+                       b"Cache-Control: no-store, no-cache, must-revalidate\r\n\r\n"
+                       + frame + b"\r\n")
                 idle = 0
             else:
                 idle += 1
@@ -355,7 +356,11 @@ async def camera_stream() -> StreamingResponse:
     return StreamingResponse(
         frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 

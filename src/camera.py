@@ -160,7 +160,8 @@ class CameraStreamer:
             return self._proc is not None and self._proc.poll() is None
 
     def _stream_argv(self, mode: str, device: str) -> Optional[list[str]]:
-        w, h = config.CAMERA_STREAM_WIDTH, config.CAMERA_STREAM_HEIGHT
+        capture_w, capture_h = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+        stream_w, stream_h = config.CAMERA_STREAM_WIDTH, config.CAMERA_STREAM_HEIGHT
         fps = max(1, config.CAMERA_STREAM_FPS)
         q = max(10, min(100, config.CAMERA_STREAM_QUALITY))
         gst = shutil.which("gst-launch-1.0")
@@ -168,45 +169,100 @@ class CameraStreamer:
             src = ["v4l2src", f"device={device}"]
             if mode == "gst-isp":
                 src += ["en-awisp=1", "en-largemode=0"]
-            caps = (f"video/x-raw,format=I420,width={w},height={h}"
-                    if mode == "gst-isp" else "video/x-raw")
+            # Open the sensor at the same native mode that probing proved works.
+            # The Allwinner ISP does not negotiate the 640x480 preview size
+            # directly, so any preview downscaling must happen downstream.
+            caps = (
+                f"video/x-raw,format=I420,width={capture_w},height={capture_h}"
+                if mode == "gst-isp"
+                else f"video/x-raw,width={capture_w},height={capture_h}"
+            )
             convert = [] if mode == "gst-isp" else ["videoconvert", "!"]
-            return ([gst, "-q"] + src + ["!", caps, "!",
-                    "videorate", "!", f"video/x-raw,framerate={fps}/1", "!"]
-                    + convert + ["jpegenc", f"quality={q}", "!", "fdsink", "fd=1"])
+            scale = []
+            if (stream_w, stream_h) != (capture_w, capture_h):
+                scale = [
+                    "videoscale", "!",
+                    f"video/x-raw,width={stream_w},height={stream_h}", "!",
+                ]
+            return (
+                [gst, "-q"]
+                + src
+                + ["!", caps, "!", "videorate", "drop-only=true", f"max-rate={fps}", "!"]
+                + scale
+                + convert
+                + ["jpegenc", f"quality={q}", "!", "fdsink", "fd=1"]
+            )
         ffmpeg = shutil.which("ffmpeg")
         if mode == "ffmpeg" and ffmpeg:
             return [ffmpeg, "-nostdin", "-loglevel", "error", "-f", "v4l2",
-                    "-video_size", f"{w}x{h}", "-i", device, "-r", str(fps),
+                    "-video_size", f"{stream_w}x{stream_h}", "-i", device, "-r", str(fps),
                     "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "5", "-"]
         return None
+
+    def _wait_for_first_frame(self, proc: subprocess.Popen) -> bool:
+        """Confirm the capture pipeline is producing JPEGs before returning."""
+        deadline = time.monotonic() + config.CAMERA_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            with self._lock:
+                if self._proc is not proc:
+                    return False
+                if self._latest is not None:
+                    return True
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+
+        with self._lock:
+            if self._proc is proc:
+                self._proc = None
+                should_terminate = True
+            else:
+                should_terminate = False
+        if should_terminate:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        logger.warning("camera stream did not produce a frame before timeout")
+        return False
 
     def ensure_started(self) -> bool:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
-                return True
+                proc = self._proc
+                if self._latest is not None:
+                    return True
+            else:
+                self._proc = None
+                proc = None
+        if proc is not None:
+            return self._wait_for_first_frame(proc)
+
         probed = _probe()
         if probed is None:
             return False
         argv = self._stream_argv(*probed)
         if argv is None:
             return False
+
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
-                return True
-            self._stop.clear()
-            self._latest = None
-            try:
-                self._proc = subprocess.Popen(
-                    argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
-            except OSError as exc:
-                logger.warning("could not start camera stream: %s", exc)
-                self._proc = None
-                return False
-            self._reader = threading.Thread(target=self._read_loop, args=(self._proc,), daemon=True)
-            self._reader.start()
-            logger.info("camera stream started (%s %s)", probed[0], probed[1])
-            return True
+                proc = self._proc
+            else:
+                self._stop.clear()
+                self._latest = None
+                try:
+                    proc = subprocess.Popen(
+                        argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+                except OSError as exc:
+                    logger.warning("could not start camera stream: %s", exc)
+                    self._proc = None
+                    return False
+                self._proc = proc
+                self._reader = threading.Thread(target=self._read_loop, args=(proc,), daemon=True)
+                self._reader.start()
+                logger.info("camera stream started (%s %s)", probed[0], probed[1])
+        return self._wait_for_first_frame(proc)
 
     def _read_loop(self, proc: subprocess.Popen) -> None:
         buffer = b""
