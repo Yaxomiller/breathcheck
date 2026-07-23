@@ -17,6 +17,7 @@ Serves the kiosk frontend plus a small JSON API:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import io
@@ -28,6 +29,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -323,6 +325,38 @@ def photo(filename: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Photo not found")
     return FileResponse(path, media_type="image/jpeg")
+
+
+# --- Camera live preview -----------------------------------------------------------
+
+@app.get("/api/camera/stream")
+async def camera_stream() -> StreamingResponse:
+    # Probing/first start opens the ISP (~1-2s); do it off the event loop.
+    started = await run_in_threadpool(camera.streamer.ensure_started)
+    if not started:
+        raise HTTPException(status_code=503, detail="Camera unavailable")
+
+    async def frames():
+        idle = 0
+        last = None
+        while True:
+            frame = camera.streamer.latest_jpeg()
+            if frame is not None and frame is not last:
+                last = frame
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                       + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
+                idle = 0
+            else:
+                idle += 1
+                if idle > 250:   # ~15s with no new frame — let the <img> retry
+                    break
+            await asyncio.sleep(1.0 / max(1, config.CAMERA_STREAM_FPS))
+
+    return StreamingResponse(
+        frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # --- GPS --------------------------------------------------------------------------

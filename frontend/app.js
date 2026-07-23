@@ -127,43 +127,37 @@ async function refreshStatus() {
 }
 
 /* ============================== camera ============================== */
+/* getUserMedia can't reach this board's MIPI sensor, so the live preview is
+   an MJPEG stream the backend produces (/api/camera/stream); the exhale photo
+   is grabbed server-side from that same stream. The <img> feeds share one
+   backend stream request via a cache-busting src. */
 
-async function startCamera() {
-  if (state.stream) return true;
-  try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false,
-    });
-    $("#cam").srcObject = state.stream;
-    $("#cam2").srcObject = state.stream;
-    $("#cam-off").classList.add("hidden");
-    return true;
-  } catch (err) {
-    $("#cam-off").classList.remove("hidden");
-    return false;
-  }
+function startCamera() {
+  const url = `/api/camera/stream?t=${Date.now()}`;
+  ["#cam", "#cam2"].forEach((sel) => {
+    const img = $(sel);
+    img.onerror = () => $("#cam-off").classList.remove("hidden");
+    img.onload = () => $("#cam-off").classList.add("hidden");
+    img.src = url;
+  });
+  state.stream = true;
+  return true;
 }
 
 function stopCamera() {
-  if (state.stream) {
-    state.stream.getTracks().forEach((track) => track.stop());
-    state.stream = null;
-    $("#cam").srcObject = null;
-    $("#cam2").srcObject = null;
-  }
+  ["#cam", "#cam2"].forEach((sel) => {
+    const img = $(sel);
+    img.onerror = null;
+    img.onload = null;
+    img.removeAttribute("src");
+  });
+  state.stream = false;
 }
 
+/* Photo is captured by the backend from the live stream; nothing to grab in
+   the browser on this board. */
 function capturePhoto() {
-  const video = $("#cam2");
-  if (!state.stream || !video.videoWidth) return "";
-  const canvas = $("#snap");
-  const width = Math.min(640, video.videoWidth);
-  const height = Math.round(width * video.videoHeight / video.videoWidth);
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext("2d").drawImage(video, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return "";
 }
 
 /* ============================== scan flow ============================== */

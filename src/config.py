@@ -108,6 +108,14 @@ CAMERA_JPEG_QUALITY = _int("HH_CAMERA_JPEG_QUALITY", 85)
 CAMERA_TIMEOUT_SECONDS = _float("HH_CAMERA_TIMEOUT_SECONDS", 12.0)  # ISP init is slow
 CAMERA_PIPELINE = _str("HH_CAMERA_PIPELINE", "")   # full gst pipeline override
 
+# Live preview: one persistent pipeline streams MJPEG to the browser AND
+# supplies the exhale photo (grabbed from the latest frame), so the camera is
+# opened once and shared. Lower resolution keeps the preview smooth.
+CAMERA_STREAM_WIDTH = _int("HH_CAMERA_STREAM_WIDTH", 640)
+CAMERA_STREAM_HEIGHT = _int("HH_CAMERA_STREAM_HEIGHT", 480)
+CAMERA_STREAM_FPS = _int("HH_CAMERA_STREAM_FPS", 12)
+CAMERA_STREAM_QUALITY = _int("HH_CAMERA_STREAM_QUALITY", 75)
+
 # --- GPS --------------------------------------------------------------------
 # "mock" on a PC, "nmea" with a serial GPS module, "off" to disable.
 GPS_MODE = _str("HH_GPS_MODE", "mock").lower()

@@ -125,7 +125,8 @@ main { flex: 1; position: relative; overflow: hidden; }
   background: #060a12;
   border: 1px solid var(--line);
 }
-.cam-wrap video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.cam-wrap video, .cam-wrap .cam-feed { width: 100%; height: 100%; object-fit: cover; }
+.cam-wrap .cam-feed { display: block; background: #060a12; }
 .cam-small { width: min(44vw, 240px); }
 .cam-off {
   position: absolute; inset: 0;
