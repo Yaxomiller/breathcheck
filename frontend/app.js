@@ -332,6 +332,9 @@ function trackCycle(session) {
         cancelCountdown();
         beep(660, 400);
         state.result = status.result;
+        // The camera can't be driven from the browser on this board — the
+        // backend grabs the exhale photo itself; this flags whether it did.
+        state.scan.photoCaptured = !!status.photo_captured;
         showResults(status.result);
         return;
       }
@@ -414,6 +417,17 @@ function showResults(result) {
   if (!result.demo_clean && result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
 
+/* Browser-captured photo (canvas) takes priority; otherwise fall back to the
+   photo the backend grabbed itself via ffmpeg during the scan (used on
+   boards where getUserMedia can't reach the camera). */
+function photoPreviewUrl() {
+  if (state.photoData) return state.photoData;
+  if (state.scan && state.scan.photoCaptured) {
+    return `/photos/${state.scan.receipt_id}.jpg?t=${Date.now()}`;
+  }
+  return "";
+}
+
 function setResultCard(cardSel, flagSel, flag) {
   const failed = flag === "YES";
   $(cardSel).classList.toggle("fail", failed);
@@ -443,8 +457,9 @@ function openForm() {
     `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${value}</b></div>`).join("");
 
   const photo = $("#form-photo");
-  if (state.photoData) {
-    photo.src = state.photoData;
+  const photoUrl = photoPreviewUrl();
+  if (photoUrl) {
+    photo.src = photoUrl;
     photo.classList.remove("hidden");
     $("#form-nophoto").classList.add("hidden");
   } else {
@@ -524,10 +539,11 @@ function buildPrintReceipt(receiptId, name) {
     ["Alcohol", `${fmtVal(result.alcohol_bac)} mV.s [${result.alcohol_flag === "YES" ? "FAIL" : "PASS"}]`],
     ["Cannabis", `${fmtVal(result.cannabis_ppb)} mV.s [${result.cannabis_flag === "YES" ? "FAIL" : "PASS"}]`],
   ];
+  const printPhotoUrl = photoPreviewUrl();
   $("#print-receipt").innerHTML = `
     <h3>BREATHCHECK</h3>
     <div class="pr-line"></div>
-    ${state.photoData ? `<img src="${state.photoData}" alt="">` : ""}
+    ${printPhotoUrl ? `<img src="${printPhotoUrl}" alt="">` : ""}
     ${rows.map(([k, v]) => `<div class="pr-row"><span>${k}</span><span>${v}</span></div>`).join("")}
     <div class="pr-line"></div>
     <div class="pr-big">${result.test_result}</div>

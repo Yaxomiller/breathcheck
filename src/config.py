@@ -85,6 +85,17 @@ MOCK_ALCOHOL_MAX = _float("HH_MOCK_ALCOHOL_MAX", 30.0)
 MOCK_CANNABIS_MIN = _float("HH_MOCK_CANNABIS_MIN", 0.0)
 MOCK_CANNABIS_MAX = _float("HH_MOCK_CANNABIS_MAX", 6.0)
 
+# --- Camera (server-side exhale-photo capture) ------------------------------
+# Chromium's getUserMedia cannot drive this board's MIPI/CSI camera (the
+# sunxi-vin driver exposes several /dev/videoN pipeline nodes that never
+# negotiate a browser-usable stream), so the exhale photo is grabbed directly
+# from the video device with ffmpeg during the scan instead.
+# Leave HH_CAMERA_DEVICE blank to auto-probe every /dev/video* node once and
+# cache whichever produces a real JPEG; set it (e.g. /dev/video0) to skip
+# probing once you know which node works.
+CAMERA_DEVICE = _str("HH_CAMERA_DEVICE", "")
+CAMERA_TIMEOUT_SECONDS = _float("HH_CAMERA_TIMEOUT_SECONDS", 3.0)
+
 # --- GPS --------------------------------------------------------------------
 # "mock" on a PC, "nmea" with a serial GPS module, "off" to disable.
 GPS_MODE = _str("HH_GPS_MODE", "mock").lower()

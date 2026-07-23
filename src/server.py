@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src import analyzer as analyzer_module
-from src import config, db, device, scan
+from src import camera, config, db, device, scan
 from src.gps import GpsProvider
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
@@ -153,7 +153,21 @@ def status() -> dict[str, Any]:
 
 # --- Scan flow ----------------------------------------------------------------
 
-def _run_scan(session_id: str, measure_seconds: float) -> None:
+def _capture_photo(session_id: str, receipt_id: str) -> None:
+    """Runs in its own thread so the ffmpeg subprocess (can take ~1-2s)
+    never blocks the SPI doorbell loop, which must answer within 100 ms."""
+    safe_name = "".join(c for c in receipt_id if c.isalnum() or c in "-_") or "photo"
+    target = config.PHOTO_DIR / f"{safe_name}.jpg"
+    ok = camera.capture_jpeg(target)
+    with _sessions_lock:
+        session = _sessions.get(session_id)
+        if session is not None:
+            session["photo_captured"] = ok
+
+
+def _run_scan(session_id: str, measure_seconds: float, receipt_id: str, photo_second: float) -> None:
+    photo_state = {"triggered": False}
+
     def progress(phase: str, elapsed: float, total: float) -> None:
         with _sessions_lock:
             session = _sessions.get(session_id)
@@ -162,6 +176,9 @@ def _run_scan(session_id: str, measure_seconds: float) -> None:
                 session["phase_elapsed"] = round(elapsed, 2)
                 session["phase_total"] = total
                 session["phase_at"] = time.time()
+        if phase == "measure" and not photo_state["triggered"] and elapsed >= photo_second:
+            photo_state["triggered"] = True
+            threading.Thread(target=_capture_photo, args=(session_id, receipt_id), daemon=True).start()
 
     try:
         cycle = _analyzer.run_cycle(measure_seconds, progress)
@@ -191,6 +208,8 @@ def scan_start() -> dict[str, Any]:
     receipt_id = f"R{now.strftime('%y%m%d')}-{counter:04d}"
     session_id = uuid.uuid4().hex[:12]
 
+    photo_second = max(1, int(float(settings.get("photo_second", "4"))))
+
     session = {
         "status": "running",
         "receipt_id": receipt_id,
@@ -200,6 +219,7 @@ def scan_start() -> dict[str, Any]:
         "phase_elapsed": 0.0,
         "phase_total": 0.0,
         "phase_at": time.time(),
+        "photo_captured": False,
         "started_at": now.isoformat(timespec="seconds"),
     }
     with _sessions_lock:
@@ -209,7 +229,9 @@ def scan_start() -> dict[str, Any]:
                 _sessions.pop(key, None)
         _sessions[session_id] = session
 
-    threading.Thread(target=_run_scan, args=(session_id, seconds), daemon=True).start()
+    threading.Thread(
+        target=_run_scan, args=(session_id, seconds, receipt_id, photo_second), daemon=True,
+    ).start()
     return {
         "session_id": session_id,
         "receipt_id": receipt_id,
@@ -217,7 +239,7 @@ def scan_start() -> dict[str, Any]:
         "seconds": seconds,
         "purge_seconds": config.PURGE_SECONDS,
         "baseline_seconds": config.BASELINE_SECONDS,
-        "photo_second": max(1, int(float(settings.get("photo_second", "4")))),
+        "photo_second": photo_second,
         "area": settings.get("area", ""),
         "version": settings.get("version", config.APP_VERSION),
         "set_no": settings.get("set_no", ""),
@@ -245,16 +267,22 @@ def scan_status(session_id: str) -> dict[str, Any]:
 
 @app.post("/api/records")
 def save_record(record: RecordIn) -> dict[str, Any]:
+    safe_name = "".join(c for c in record.receipt_id if c.isalnum() or c in "-_") or "photo"
     photo_file = ""
     if record.photo_b64:
         try:
             payload = record.photo_b64.split(",", 1)[-1]
             raw = base64.b64decode(payload)
-            safe_name = "".join(c for c in record.receipt_id if c.isalnum() or c in "-_")
             photo_file = f"{safe_name}.jpg"
             (config.PHOTO_DIR / photo_file).write_bytes(raw)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=f"Photo could not be saved: {exc}")
+    else:
+        # No browser upload (getUserMedia unavailable on this camera) — use
+        # whatever the backend already captured server-side during the scan.
+        candidate = config.PHOTO_DIR / f"{safe_name}.jpg"
+        if candidate.is_file():
+            photo_file = candidate.name
 
     data = record.model_dump(exclude={"photo_b64"})
     data["photo_file"] = photo_file

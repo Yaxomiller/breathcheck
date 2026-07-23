@@ -26,6 +26,9 @@ apt-get install -y python3 python3-venv python3-pip curl
 apt-get install -y chromium || apt-get install -y chromium-browser \
   || echo "WARN: no chromium package found — install a Chromium browser manually for the kiosk"
 apt-get install -y unclutter || true   # hides the mouse cursor on the touchscreen
+# Exhale-photo capture: the browser can't drive this board's MIPI/CSI camera,
+# so the backend grabs frames itself with ffmpeg (src/camera.py).
+apt-get install -y ffmpeg || echo "WARN: ffmpeg not installed — exhale photos will be skipped"
 
 echo "==> Python environment"
 python3 -m venv "$VENV"
