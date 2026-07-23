@@ -201,6 +201,20 @@ def _run_scan(session_id: str, measure_seconds: float) -> None:
                 "test_time": now.strftime("%H:%M:%S"),
             },
         }
+        # TEMPORARY demo override (HH_DEMO_FORCE_CLEAN=1): report clean
+        # regardless of the real reading. The cycle above still ran.
+        if config.DEMO_FORCE_CLEAN:
+            update["result"].update({
+                "alcohol_bac": 0.0, "cannabis_ppb": 0.0,
+                "alcohol_baseline": 0.0, "alcohol_peak": 0.0,
+                "cannabis_baseline": 0.0, "cannabis_peak": 0.0,
+                "alcohol_baseline_raw": 0.0, "alcohol_peak_raw": 0.0,
+                "cannabis_baseline_raw": 0.0, "cannabis_peak_raw": 0.0,
+                "baseline_stable": True,
+                "alcohol_flag": "NO", "cannabis_flag": "NO",
+                "test_result": "PASS",
+                "demo_clean": True,
+            })
     except Exception as exc:
         logger.exception("Scan %s failed", session_id)
         update = {"status": "error", "error": str(exc)}

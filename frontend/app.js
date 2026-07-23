@@ -386,17 +386,32 @@ function showResults(result) {
   verdict.textContent = result.test_result;
   verdict.className = `verdict ${result.test_result === "PASS" ? "good" : "bad"}`;
 
-  $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
-  $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
-  /* TEMPORARY: raw sensor-native values for calibration (revert on request) */
-  $("#sub-alcohol").textContent =
-    `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
-  $("#sub-cannabis").textContent =
-    `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
+  const cannabisValue = $("#val-cannabis").parentElement;
+  if (result.demo_clean) {
+    /* DEMO override (HH_DEMO_FORCE_CLEAN=1): show a clean result. */
+    $("#val-alcohol").textContent = "0";
+    $("#unit-alcohol").textContent = "BAC";
+    $("#val-cannabis").textContent = "NO PRESENCE";
+    $("#unit-cannabis").textContent = "";
+    cannabisValue.classList.add("rc-text");
+    $("#sub-alcohol").textContent = "";
+    $("#sub-cannabis").textContent = "";
+  } else {
+    $("#unit-alcohol").textContent = "mV·s";
+    $("#unit-cannabis").textContent = "mV·s";
+    cannabisValue.classList.remove("rc-text");
+    $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
+    $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
+    /* TEMPORARY: raw sensor-native values for calibration (revert on request) */
+    $("#sub-alcohol").textContent =
+      `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
+    $("#sub-cannabis").textContent =
+      `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
+  }
   setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
   setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
   result.test_result === "PASS" ? sndPass() : sndFail();
-  if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
+  if (!result.demo_clean && result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
 
 function setResultCard(cardSel, flagSel, flag) {

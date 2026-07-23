@@ -44,6 +44,13 @@ WEB_PORT = _int("HH_WEB_PORT", 8000)
 # "mock" on a PC, "spi" on the device with the sensor board attached.
 ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()
 
+# TEMPORARY demo override: force every scan to report a clean result
+# (alcohol 0 BAC, cannabis "no presence", PASS) regardless of the real
+# sensor reading. Set HH_DEMO_FORCE_CLEAN=1 to enable for a demo; remove
+# it (or set 0) to return to real detection. The full scan cycle still
+# runs — only the displayed/stored result is overridden.
+DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "0").lower() in {"1", "true", "yes", "on"}
+
 # Measurement cycle (seconds). The blow window itself is the officer-visible
 # "scan time" setting; purge/baseline are hardware timings.
 PURGE_SECONDS = _float("HH_PURGE_SECONDS", 15.0)      # pump on, sensors warming
