@@ -399,6 +399,11 @@ function showResults(result) {
     `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
   $("#sub-cannabis").textContent =
     `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
+  /* upper/lower area split of the exhale curve at the threshold */
+  $("#val-ratio").textContent = (Number(result.cannabis_ratio) || 0).toFixed(3);
+  $("#val-ratio").title =
+    `upper ${result.cannabis_upper ?? 0} / lower ${result.cannabis_lower ?? 0} mV·s ` +
+    `at ${result.cannabis_threshold ?? 0} mV (${result.cannabis_points ?? 0} pts)`;
   setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
   setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
   result.test_result === "PASS" ? sndPass() : sndFail();
@@ -440,6 +445,7 @@ function openForm() {
     ["RESULT", result.test_result, result.test_result === "PASS" ? "good" : "bad"],
     ["ALCOHOL", `${fmtVal(result.alcohol_bac)} mV·s`, result.alcohol_flag === "YES" ? "bad" : "good"],
     ["CANNABIS", `${fmtVal(result.cannabis_ppb)} mV·s`, result.cannabis_flag === "YES" ? "bad" : "good"],
+    ["U/L RATIO", (Number(result.cannabis_ratio) || 0).toFixed(3)],
   ];
   $("#auto-grid").innerHTML = autoItems.map(([label, value, cls]) =>
     `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${value}</b></div>`).join("");
@@ -493,6 +499,9 @@ async function saveRecord() {
       alcohol_bac: result.alcohol_bac, cannabis_ppb: result.cannabis_ppb,
       alcohol_baseline: result.alcohol_baseline || 0, alcohol_peak: result.alcohol_peak || 0,
       cannabis_baseline: result.cannabis_baseline || 0, cannabis_peak: result.cannabis_peak || 0,
+      cannabis_ratio: result.cannabis_ratio || 0,
+      cannabis_upper: result.cannabis_upper || 0, cannabis_lower: result.cannabis_lower || 0,
+      curve_file: result.curve_file || "",
       alcohol_flag: result.alcohol_flag, cannabis_flag: result.cannabis_flag,
       mobile_no: $("#f-mobile").value.trim(),
       address: $("#f-address").value.trim(),
@@ -526,6 +535,7 @@ function buildPrintReceipt(receiptId, name) {
     ["Mode", scan.testing_mode],
     ["Alcohol", `${fmtVal(result.alcohol_bac)} mV.s [${result.alcohol_flag === "YES" ? "FAIL" : "PASS"}]`],
     ["Cannabis", `${fmtVal(result.cannabis_ppb)} mV.s [${result.cannabis_flag === "YES" ? "FAIL" : "PASS"}]`],
+    ["U/L Ratio", (Number(result.cannabis_ratio) || 0).toFixed(3)],
   ];
   const printPhotoUrl = photoPreviewUrl();
   $("#print-receipt").innerHTML = `
@@ -579,6 +589,7 @@ async function openRecordDetail(id) {
       ["CANNABIS", `${fmtVal(record.cannabis_ppb)} mV·s`, record.cannabis_flag === "YES" ? "bad" : "good"],
       ["ALC PEAK", `${fmtVal(record.alcohol_peak || 0)} µA`],
       ["CAN PEAK", `${fmtVal(record.cannabis_peak || 0)} mV`],
+      ["U/L RATIO", (Number(record.cannabis_ratio) || 0).toFixed(3)],
       ["RESULT", record.test_result, record.test_result === "PASS" ? "good" : "bad"],
     ];
     $("#modal-body").innerHTML = `
@@ -765,6 +776,155 @@ function bindEvents() {
   bindSettings();
 }
 
+/* ============================== on-screen keyboard ==============================
+   The handheld has no physical keys, so every text/number field is filled from
+   this panel. Keys never steal focus (pointerdown is prevented), and each press
+   dispatches a real `input` event so existing field listeners still run. */
+
+const KB_TEXT_ROWS = [
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+  ["{shift}", "z", "x", "c", "v", "b", "n", "m", "{bksp}"],
+  ["-", "/", "{space}", ".", ",", "{done}"],
+];
+const KB_NUM_ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  [".", "0", "{bksp}"],
+  ["{clear}", "{done}"],
+];
+const KB_LABELS = {
+  "{shift}": "SHIFT", "{bksp}": "⌫", "{space}": "SPACE",
+  "{done}": "DONE", "{clear}": "CLEAR",
+};
+
+const kb = { el: null, input: null, mode: "text", shift: false };
+
+/* Which inputs get the keyboard. Date/time/range keep their native pickers. */
+function kbModeFor(el) {
+  if (!el || el.tagName !== "INPUT" || el.readOnly || el.disabled) return null;
+  const type = (el.getAttribute("type") || "text").toLowerCase();
+  // Digit-only fields may declare themselves via type OR inputmode (the
+  // mobile-number field uses inputmode="tel" with no type).
+  const inputmode = (el.getAttribute("inputmode") || "").toLowerCase();
+  if (type === "number" || type === "tel" ||
+      ["numeric", "tel", "decimal"].includes(inputmode)) return "num";
+  if (type === "text" || type === "search" || type === "") return "text";
+  return null;
+}
+
+function kbRender() {
+  const rows = kb.mode === "num" ? KB_NUM_ROWS : KB_TEXT_ROWS;
+  kb.el.classList.toggle("num", kb.mode === "num");
+  kb.el.innerHTML = rows.map((row) => `<div class="kb-row">` + row.map((key) => {
+    const special = key.startsWith("{");
+    const label = special ? KB_LABELS[key] : (kb.shift ? key.toUpperCase() : key);
+    const cls = special ? ` kb-${key.slice(1, -1)}` : "";
+    const on = key === "{shift}" && kb.shift ? " on" : "";
+    return `<button type="button" class="kb-key${cls}${on}" data-key="${key}">${label}</button>`;
+  }).join("") + `</div>`).join("");
+}
+
+function kbInsert(text) {
+  const input = kb.input;
+  if (!input) return;
+  const value = input.value;
+  const start = input.selectionStart ?? value.length;
+  const end = input.selectionEnd ?? value.length;
+  input.value = value.slice(0, start) + text + value.slice(end);
+  const caret = start + text.length;
+  try { input.setSelectionRange(caret, caret); } catch (err) { /* number inputs */ }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function kbBackspace() {
+  const input = kb.input;
+  if (!input) return;
+  const value = input.value;
+  const start = input.selectionStart ?? value.length;
+  const end = input.selectionEnd ?? value.length;
+  let caret = start;
+  if (start !== end) {
+    input.value = value.slice(0, start) + value.slice(end);
+  } else if (start > 0) {
+    input.value = value.slice(0, start - 1) + value.slice(start);
+    caret = start - 1;
+  }
+  try { input.setSelectionRange(caret, caret); } catch (err) { /* number inputs */ }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function kbKey(key) {
+  if (!kb.input) return;
+  switch (key) {
+    case "{shift}": kb.shift = !kb.shift; kbRender(); return;
+    case "{bksp}": kbBackspace(); return;
+    case "{space}": kbInsert(" "); return;
+    case "{clear}":
+      kb.input.value = "";
+      kb.input.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    case "{done}": {
+      // Commit and close directly — do not rely on the blur event arriving.
+      const input = kb.input;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      kbClose();
+      input.blur();
+      return;
+    }
+    default:
+      kbInsert(kb.shift ? key.toUpperCase() : key);
+      if (kb.shift) { kb.shift = false; kbRender(); }
+  }
+}
+
+function kbOpen(input) {
+  const mode = kbModeFor(input);
+  if (!mode) return;
+  kb.input = input;
+  kb.mode = mode;
+  kb.shift = false;
+  kbRender();
+  kb.el.classList.remove("hidden");
+  document.body.classList.add("kb-open");
+  // The panel covers the lower screen — bring the field back into view.
+  setTimeout(() => input.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+}
+
+function kbClose() {
+  kb.input = null;
+  kb.el.classList.add("hidden");
+  document.body.classList.remove("kb-open");
+}
+
+function initKeyboard() {
+  kb.el = $("#keyboard");
+  // Keep focus on the field while typing.
+  kb.el.addEventListener("pointerdown", (e) => e.preventDefault());
+  kb.el.addEventListener("mousedown", (e) => e.preventDefault());
+  kb.el.addEventListener("click", (e) => {
+    const key = e.target.closest(".kb-key");
+    if (key) { kbKey(key.dataset.key); beep(1200, 25, "sine", 0.03); }
+  });
+
+  document.addEventListener("focusin", (e) => {
+    if (kbModeFor(e.target)) kbOpen(e.target);
+    else if (kb.input) kbClose();   // moved to a date picker, button, etc.
+  });
+  document.addEventListener("focusout", (e) => {
+    if (!kbModeFor(e.target)) return;
+    // Fields edited via the keyboard need an explicit change event, since the
+    // browser only fires one for real user input.
+    e.target.dispatchEvent(new Event("change", { bubbles: true }));
+    const left = e.target;
+    setTimeout(() => {
+      if (kb.input === left && document.activeElement !== left) kbClose();
+    }, 0);
+  });
+}
+
 /* Kiosk touchscreen: block every zoom gesture. touch-action in CSS handles
    most of it; these cover pinch (multi-touch) and mouse/keyboard zoom too. */
 function blockZoom() {
@@ -781,6 +941,7 @@ function blockZoom() {
 
 async function boot() {
   blockZoom();
+  initKeyboard();
   bindEvents();
   tickClock();
   setInterval(tickClock, 1000);

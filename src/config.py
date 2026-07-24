@@ -44,6 +44,7 @@ APP_VERSION = "1.1.6"
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(_str("HH_DATA_DIR", str(BASE_DIR / "data")))
 PHOTO_DIR = DATA_DIR / "photos"
+CURVE_DIR = DATA_DIR / "curves"      # per-scan exhale ADC traces (CSV)
 DB_PATH = DATA_DIR / "breathcheck.db"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
@@ -76,6 +77,13 @@ STREAM_DEAD_SECONDS = _float("HH_STREAM_DEAD_SECONDS", 10.0)
 
 # Unit conversion — keep in sync with the STM32 firmware.
 RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
+
+# Cannabis upper/lower area ratio. The exhale trace (PID delta above the
+# fresh-air baseline, in mV) is a positive bell; a horizontal line at this
+# threshold splits the area under it into an upper section (the part of the
+# curve poking above the line) and a lower section (the part beneath it).
+# The reported ratio is upper / lower.
+CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
 # Alcohol-cell stabilization at app start (fresh-air settle).
 SETTLE_SLOPE_NA_S = _float("HH_SETTLE_SLOPE_NA_S", 30.0)

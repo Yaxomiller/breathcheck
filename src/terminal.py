@@ -134,6 +134,7 @@ class Terminal:
         print()
 
         result = scan.build_result(cycle, settings, now)
+        result["curve_file"] = scan.save_curve(receipt_id, cycle)
         self._print_result(result)
 
         if result.get("baseline_stable") is False:
@@ -160,6 +161,10 @@ class Terminal:
               _flag("", result["alcohol_flag"] == "YES"))
         print("  CANNABIS  " + f"{cannabis_disp:>14}   " +
               _flag("", result["cannabis_flag"] == "YES"))
+        ratio_disp = f"{result.get('cannabis_ratio', 0.0):.3f}"
+        print("  U/L RATIO " + f"{ratio_disp:>14}   " +
+              f"(thr {result.get('cannabis_threshold', 0)} mV, "
+              f"{result.get('cannabis_points', 0)} pts)")
         verdict = result["test_result"]
         print("  VERDICT   " +
               (green(verdict) if verdict == "PASS" else red(verdict)))

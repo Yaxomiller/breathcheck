@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 import random
 import struct
 import threading
@@ -100,6 +101,9 @@ class ChannelResult:
     peak_t_ms: int         # ms into the cycle at the peak
     integral_mvs: float    # trapezoidal integral of the delta, mV*s
     stable: bool = True    # baseline spread within tolerance
+    # Exhale trace, one entry per sample in the MEASURE window:
+    # (ms into the blow, raw ADC value, delta above baseline, delta in mV)
+    samples: tuple[tuple[int, float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,13 @@ def _mvs(src: int, integ_raw_ms: float) -> float:
     return integ_raw_ms * PID_MV_PER_LSB / 1000.0             # code*ms -> mV*s
 
 
+def sample_mv(src: int, raw_delta: float) -> float:
+    """Convert one raw sample delta to mV (V = I*Rtia for the fuel cell)."""
+    if src == SRC_AD5941:
+        return raw_delta * config.RTIA_KOHM / 1000.0          # nA -> mV
+    return raw_delta * PID_MV_PER_LSB                         # codes -> mV
+
+
 class BreathAnalyzer:
     name = "base"
     startup_warnings: tuple[str, ...] = ()
@@ -126,6 +137,21 @@ class BreathAnalyzer:
 
     def stabilize(self) -> None:
         """App-start priming; no-op for the mock."""
+
+
+def _mock_bell(measure_ms: float, baseline: float, peak_delta: float,
+               step_ms: int = 100) -> tuple[tuple[int, float, float, float], ...]:
+    """A positive bell-shaped exhale trace for development machines, shaped
+    like the real PID response (rise, peak mid-blow, decay)."""
+    centre = measure_ms * 0.45
+    width = max(1.0, measure_ms * 0.22)
+    samples = []
+    for t_ms in range(0, int(measure_ms) + 1, step_ms):
+        bell = math.exp(-((t_ms - centre) ** 2) / (2 * width * width))
+        delta = peak_delta * bell + random.uniform(-0.4, 0.4)
+        samples.append((t_ms, round(baseline + delta, 1), round(delta, 2),
+                        sample_mv(SRC_AD7798, delta)))
+    return tuple(samples)
 
 
 class MockAnalyzer(BreathAnalyzer):
@@ -156,8 +182,11 @@ class MockAnalyzer(BreathAnalyzer):
 
                 alcohol_mvs = random.uniform(config.MOCK_ALCOHOL_MIN, config.MOCK_ALCOHOL_MAX)
                 cannabis_mvs = random.uniform(config.MOCK_CANNABIS_MIN, config.MOCK_CANNABIS_MAX)
+                measure_ms = max(1.0, measure_seconds) * 1000.0
                 peak_ms = int((config.PURGE_SECONDS + config.BASELINE_SECONDS
                                + measure_seconds * random.uniform(0.3, 0.7)) * 1000)
+                cannabis_baseline = round(random.uniform(400, 800), 1)
+                cannabis_peak = round(cannabis_mvs * 40, 1)
                 return CycleResult(
                     alcohol=ChannelResult(
                         baseline=round(random.uniform(300, 1500), 1),        # nA
@@ -166,10 +195,11 @@ class MockAnalyzer(BreathAnalyzer):
                         integral_mvs=round(alcohol_mvs, 3),
                     ),
                     cannabis=ChannelResult(
-                        baseline=round(random.uniform(400, 800), 1),         # codes
-                        peak=round(cannabis_mvs * 40, 1),                    # codes
+                        baseline=cannabis_baseline,                          # codes
+                        peak=cannabis_peak,                                  # codes
                         peak_t_ms=peak_ms,
                         integral_mvs=round(cannabis_mvs, 3),
+                        samples=_mock_bell(measure_ms, cannabis_baseline, cannabis_peak),
                     ),
                 )
             finally:
@@ -395,7 +425,8 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             total_ms = purge_ms + baseline_ms + measure_ms
 
             stats = {s: {"base": [], "baseline": None, "integ": 0.0,
-                         "peak": 0.0, "peak_t": 0, "prev": None, "stable": True}
+                         "peak": 0.0, "peak_t": 0, "prev": None, "stable": True,
+                         "samples": []}
                      for s in (SRC_AD7798, SRC_AD5941)}
             t0: Optional[int] = None   # STM32 tick of first AD5941 sample
             try:
@@ -457,6 +488,11 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                                 if delta > channel["peak"]:
                                     channel["peak"], channel["peak_t"] = delta, dt
                                 channel["prev"] = (tick, delta)
+                                # Exhale trace, timed from the start of the blow.
+                                channel["samples"].append((
+                                    int(dt - purge_ms - baseline_ms), float(value),
+                                    float(delta), sample_mv(source, delta),
+                                ))
                         if progress:
                             progress(phase, elapsed, total)
             finally:
@@ -487,6 +523,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 peak_t_ms=int(data["peak_t"]),
                 integral_mvs=_finite(round(_mvs(source, data["integ"]), 3)),
                 stable=bool(data["stable"]),
+                samples=tuple(data["samples"]),
             )
         return CycleResult(alcohol=channel(SRC_AD5941), cannabis=channel(SRC_AD7798))
 

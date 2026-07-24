@@ -7,11 +7,75 @@ between the two front-ends.
 """
 from __future__ import annotations
 
+import csv
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from src import analyzer as analyzer_module
 from src import config
+
+logger = logging.getLogger("breathcheck.scan")
+
+
+def area_ratio(samples, threshold_mv: float) -> dict[str, float]:
+    """Split the area under the exhale curve with a horizontal line at
+    `threshold_mv` and return upper/lower areas (mV*s) plus their ratio.
+
+    The trace is a positive bell. For each sample the curve height y is
+    clamped at 0 (noise below the baseline is not negative area):
+      upper contribution = max(0, y - threshold)   -> the cap above the line
+      lower contribution = min(y, threshold)       -> the part beneath the line
+    Both are integrated over time with the trapezoid rule, so
+    upper + lower == the total area under the curve.
+    """
+    upper_ms = lower_ms = 0.0
+    previous: Optional[tuple[int, float, float]] = None
+    for sample in samples:
+        t_ms, _adc, _delta, mv = sample
+        height = max(0.0, float(mv))
+        upper = max(0.0, height - threshold_mv)
+        lower = min(height, threshold_mv)
+        if previous is not None:
+            prev_t, prev_upper, prev_lower = previous
+            span = t_ms - prev_t
+            upper_ms += (upper + prev_upper) / 2.0 * span
+            lower_ms += (lower + prev_lower) / 2.0 * span
+        previous = (t_ms, upper, lower)
+
+    upper_mvs = upper_ms / 1000.0      # mV*ms -> mV*s
+    lower_mvs = lower_ms / 1000.0
+    ratio = (upper_mvs / lower_mvs) if lower_mvs > 0 else 0.0
+    return {
+        "upper": round(upper_mvs, 4),
+        "lower": round(lower_mvs, 4),
+        "ratio": round(ratio, 3),
+        "threshold": threshold_mv,
+        "points": len(samples),
+    }
+
+
+def save_curve(receipt_id: str, cycle: "analyzer_module.CycleResult") -> str:
+    """Write the exhale ADC trace for this scan to data/curves/<receipt>.csv.
+    Returns the filename, or "" if there was nothing to write."""
+    samples = cycle.cannabis.samples
+    if not samples:
+        return ""
+    safe_name = "".join(c for c in receipt_id if c.isalnum() or c in "-_") or "curve"
+    filename = f"{safe_name}.csv"
+    try:
+        config.CURVE_DIR.mkdir(parents=True, exist_ok=True)
+        path = Path(config.CURVE_DIR) / filename
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["time_ms", "adc_code", "delta_code", "delta_mv"])
+            for t_ms, adc, delta, mv in samples:
+                writer.writerow([t_ms, adc, round(delta, 3), round(mv, 5)])
+    except OSError as exc:
+        logger.warning("could not write curve CSV for %s: %s", receipt_id, exc)
+        return ""
+    return filename
 
 
 def new_receipt(counter: int, now: Optional[datetime] = None) -> str:
@@ -52,6 +116,15 @@ def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
         "test_date": now.strftime("%Y-%m-%d"),
         "test_time": now.strftime("%H:%M:%S"),
     }
+    # Upper/lower area split of the exhale curve at the cannabis threshold.
+    areas = area_ratio(cycle.cannabis.samples, config.CANNABIS_THRESHOLD_MV)
+    result.update({
+        "cannabis_ratio": areas["ratio"],
+        "cannabis_upper": areas["upper"],
+        "cannabis_lower": areas["lower"],
+        "cannabis_threshold": areas["threshold"],
+        "cannabis_points": areas["points"],
+    })
     return result
 
 
@@ -79,6 +152,9 @@ def record_from_result(result: dict, session: dict, fields: dict,
         "alcohol_peak": result["alcohol_peak"],
         "cannabis_baseline": result["cannabis_baseline"],
         "cannabis_peak": result["cannabis_peak"],
+        "cannabis_ratio": result.get("cannabis_ratio", 0.0),
+        "cannabis_upper": result.get("cannabis_upper", 0.0),
+        "cannabis_lower": result.get("cannabis_lower", 0.0),
         "alcohol_flag": result["alcohol_flag"],
         "cannabis_flag": result["cannabis_flag"],
         "photo_file": "",

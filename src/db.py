@@ -55,6 +55,7 @@ RECORD_FIELDS = (
     "name", "dl_number", "vehicle_no", "test_location", "testing_officer",
     "testing_mode", "test_result", "alcohol_bac", "cannabis_ppb",
     "alcohol_baseline", "alcohol_peak", "cannabis_baseline", "cannabis_peak",
+    "cannabis_ratio", "cannabis_upper", "cannabis_lower", "curve_file",
     "alcohol_flag", "cannabis_flag", "mobile_no", "address", "photo_file",
     "created_at",
 )
@@ -66,6 +67,11 @@ _MIGRATION_COLUMNS = {
     "alcohol_peak": "REAL DEFAULT 0",
     "cannabis_baseline": "REAL DEFAULT 0",
     "cannabis_peak": "REAL DEFAULT 0",
+    # Upper/lower area split of the exhale curve (mV*s) and its trace file.
+    "cannabis_ratio": "REAL DEFAULT 0",
+    "cannabis_upper": "REAL DEFAULT 0",
+    "cannabis_lower": "REAL DEFAULT 0",
+    "curve_file": "TEXT DEFAULT ''",
 }
 
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
 <title>BreathCheck</title>
-<link rel="stylesheet" href="styles.css?v=1.1.6">
+<link rel="stylesheet" href="styles.css?v=1.2.0">
 </head>
 <body>
 
@@ -110,6 +110,7 @@
         <div class="result-card" id="card-cannabis">
           <div class="rc-name">CANNABIS</div>
           <div class="rc-value"><span id="val-cannabis">0.0</span><small id="unit-cannabis">mV&middot;s</small></div>
+          <div class="rc-ratio"><span class="rc-ratio-label">U/L RATIO</span><b id="val-ratio">--</b></div>
           <div class="rc-sub" id="sub-cannabis"></div>
           <div class="rc-flag" id="flag-cannabis">PASS</div>
         </div>
@@ -272,10 +273,13 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<!-- on-screen keyboard (touchscreen has no physical keys) -->
+<div id="keyboard" class="keyboard hidden" aria-hidden="true"></div>
+
 <!-- print receipt (visible only when printing) -->
 <div id="print-receipt"></div>
 
 <canvas id="snap" class="hidden"></canvas>
-<script src="app.js?v=1.1.6"></script>
+<script src="app.js?v=1.2.0"></script>
 </body>
 </html>

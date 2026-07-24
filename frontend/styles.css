@@ -11,6 +11,7 @@
   --bad: #ef4444;
   --warn: #f59e0b;
   --radius: 18px;
+  --kb-h: min(46vh, 300px);   /* on-screen keyboard height */
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -222,6 +223,14 @@ main { flex: 1; position: relative; overflow: hidden; }
 .rc-value { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
 .rc-value.rc-text { font-size: 26px; letter-spacing: 1px; }   /* demo: "NO PRESENCE" */
 .rc-value small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+.rc-ratio {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 14px; border-radius: 10px;
+  background: rgba(56, 189, 248, .12);
+  border: 1px solid rgba(56, 189, 248, .35);
+}
+.rc-ratio-label { font-size: 10.5px; font-weight: 800; letter-spacing: 1.5px; color: var(--accent); }
+.rc-ratio b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .rc-sub { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); }
 .rc-flag { font-size: 15px; font-weight: 800; letter-spacing: 2px; }
 .result-card.pass .rc-flag { color: var(--good); }
@@ -452,6 +461,41 @@ main { flex: 1; position: relative; overflow: hidden; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
 .detail-grid .auto-item b { font-size: 15px; }
 .detail-wide { grid-column: 1 / -1; }
+
+/* ---------- on-screen keyboard ---------- */
+.keyboard {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 300;
+  height: var(--kb-h);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  padding: 8px; gap: 6px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, .45);
+}
+.kb-row { display: flex; gap: 6px; flex: 1; justify-content: center; }
+.keyboard.num .kb-row { max-width: 400px; width: 100%; margin: 0 auto; }
+.kb-key {
+  flex: 1 1 0; min-width: 0;
+  background: var(--panel2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 10px;
+  font-size: clamp(16px, 3.4vw, 22px); font-weight: 700;
+  cursor: pointer; touch-action: manipulation;
+  transition: background .08s, transform .08s;
+}
+.kb-key:active { background: var(--accent); color: #032033; transform: scale(.94); }
+.kb-key.kb-space { flex: 5 1 0; }
+.kb-key.kb-done {
+  flex: 2.2 1 0;
+  background: linear-gradient(160deg, #67d5ff, var(--accent));
+  color: #032033; font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
+}
+.kb-key.kb-bksp, .kb-key.kb-shift, .kb-key.kb-clear {
+  flex: 1.7 1 0; font-size: 14px; font-weight: 800; letter-spacing: 1px;
+}
+.kb-key.kb-shift.on { background: rgba(56, 189, 248, .22); border-color: var(--accent); color: var(--accent); }
+
+/* keep the focused field visible above the keyboard */
+body.kb-open .screen { bottom: var(--kb-h); }
 
 /* ---------- toast ---------- */
 .toast {

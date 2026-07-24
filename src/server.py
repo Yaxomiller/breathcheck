@@ -95,6 +95,10 @@ class RecordIn(BaseModel):
     alcohol_peak: float = 0.0
     cannabis_baseline: float = 0.0
     cannabis_peak: float = 0.0
+    cannabis_ratio: float = 0.0
+    cannabis_upper: float = 0.0
+    cannabis_lower: float = 0.0
+    curve_file: str = ""
     alcohol_flag: str = "NO"
     cannabis_flag: str = "NO"
     mobile_no: str = ""
@@ -185,7 +189,10 @@ def _run_scan(session_id: str, measure_seconds: float, receipt_id: str, photo_se
     try:
         cycle = _analyzer.run_cycle(measure_seconds, progress)
         settings = db.get_settings()
-        update = {"status": "done", "result": scan.build_result(cycle, settings)}
+        result = scan.build_result(cycle, settings)
+        # Persist the exhale ADC trace next to the record.
+        result["curve_file"] = scan.save_curve(receipt_id, cycle)
+        update = {"status": "done", "result": result}
     except Exception as exc:
         logger.exception("Scan %s failed", session_id)
         update = {"status": "error", "error": str(exc)}
@@ -316,6 +323,16 @@ def wipe_records(confirm: str = "") -> dict[str, Any]:
     if confirm != "ERASE":
         raise HTTPException(status_code=400, detail="Pass confirm=ERASE to wipe the database")
     return {"deleted": db.clear_records()}
+
+
+@app.get("/curves/{filename}")
+def curve(filename: str) -> FileResponse:
+    """The raw exhale ADC trace recorded for a scan."""
+    safe_name = "".join(c for c in filename if c.isalnum() or c in "-_.")
+    path = config.CURVE_DIR / safe_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Curve not found")
+    return FileResponse(path, media_type="text/csv", filename=safe_name)
 
 
 @app.get("/photos/{filename}")
