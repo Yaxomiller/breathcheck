@@ -2,7 +2,7 @@
 
 Runs the same measurement cycle and stores to the same SQLite database as the
 web app. Started with `python app.py term`. Menu-driven: scan, database, GPS,
-settings. Honors HH_DEMO_FORCE_CLEAN for demos.
+settings.
 
 Only one process may hold the GPIO/SPI at a time, so stop the background
 service first (radxa/term.sh does this for you): sudo systemctl stop breathcheck
@@ -62,8 +62,6 @@ class Terminal:
     def run(self) -> None:
         for warning in self.analyzer.startup_warnings:
             print(amber(f"! {warning}"))
-        if config.DEMO_FORCE_CLEAN:
-            print(amber("! DEMO MODE: results forced to 0 BAC / NO PRESENCE (HH_DEMO_FORCE_CLEAN=1)"))
         while True:
             self._header()
             choice = _prompt("Choose [S]can [D]atabase [G]ps [C]settings [Q]uit").lower()
@@ -107,7 +105,7 @@ class Terminal:
         settings = db.get_settings()
         measure_seconds = max(3, int(float(settings.get("scan_seconds", "10"))))
         counter = db.next_counter()
-        now = datetime.now()
+        now = config.now_local()
         receipt_id = scan.new_receipt(counter, now)
         fix = self.gps.read()
 
@@ -138,7 +136,7 @@ class Terminal:
         result = scan.build_result(cycle, settings, now)
         self._print_result(result)
 
-        if result.get("baseline_stable") is False and not result.get("demo_clean"):
+        if result.get("baseline_stable") is False:
             print(amber("  ! baseline unstable — result suspect"))
 
         session = {
@@ -156,11 +154,8 @@ class Terminal:
 
     def _print_result(self, result: dict) -> None:
         print(bold("  " + "-" * 40))
-        if result.get("demo_clean"):
-            alcohol_disp, cannabis_disp = "0 BAC", "NO PRESENCE"
-        else:
-            alcohol_disp = f"{result['alcohol_bac']:.2f} mV.s"
-            cannabis_disp = f"{result['cannabis_ppb']:.2f} mV.s"
+        alcohol_disp = f"{result['alcohol_bac']:.2f} mV.s"
+        cannabis_disp = f"{result['cannabis_ppb']:.2f} mV.s"
         print("  ALCOHOL   " + f"{alcohol_disp:>14}   " +
               _flag("", result["alcohol_flag"] == "YES"))
         print("  CANNABIS  " + f"{cannabis_disp:>14}   " +

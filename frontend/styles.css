@@ -22,6 +22,8 @@ html, body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
   user-select: none;
+  /* kiosk: allow scrolling but no pinch-zoom / double-tap-zoom */
+  touch-action: pan-x pan-y;
 }
 
 body { display: flex; flex-direction: column; }

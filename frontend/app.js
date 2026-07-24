@@ -96,17 +96,18 @@ function goHome() {
 
 /* ============================== clock ============================== */
 
+const IST_TZ = "Asia/Kolkata";   // show IST regardless of the device timezone
 function tickClock() {
   const now = new Date();
-  const hhmm = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const hhmm = now.toLocaleTimeString([], { timeZone: IST_TZ, hour: "2-digit", minute: "2-digit", hour12: false });
   $("#top-clock").textContent = hhmm;
   $("#home-time").textContent = hhmm;
   $("#home-date").textContent = now.toLocaleDateString([], {
-    weekday: "long", day: "2-digit", month: "short", year: "numeric",
+    timeZone: IST_TZ, weekday: "long", day: "2-digit", month: "short", year: "numeric",
   });
   if (state.screen === "settings") {
     $("#set-now").textContent = now.toLocaleString([], {
-      day: "2-digit", month: "short", year: "numeric",
+      timeZone: IST_TZ, day: "2-digit", month: "short", year: "numeric",
       hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     });
   }
@@ -389,32 +390,19 @@ function showResults(result) {
   verdict.textContent = result.test_result;
   verdict.className = `verdict ${result.test_result === "PASS" ? "good" : "bad"}`;
 
-  const cannabisValue = $("#val-cannabis").parentElement;
-  if (result.demo_clean) {
-    /* DEMO override (HH_DEMO_FORCE_CLEAN=1): show a clean result. */
-    $("#val-alcohol").textContent = "0";
-    $("#unit-alcohol").textContent = "BAC";
-    $("#val-cannabis").textContent = "NO PRESENCE";
-    $("#unit-cannabis").textContent = "";
-    cannabisValue.classList.add("rc-text");
-    $("#sub-alcohol").textContent = "";
-    $("#sub-cannabis").textContent = "";
-  } else {
-    $("#unit-alcohol").textContent = "mV·s";
-    $("#unit-cannabis").textContent = "mV·s";
-    cannabisValue.classList.remove("rc-text");
-    $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
-    $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
-    /* TEMPORARY: raw sensor-native values for calibration (revert on request) */
-    $("#sub-alcohol").textContent =
-      `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
-    $("#sub-cannabis").textContent =
-      `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
-  }
+  $("#unit-alcohol").textContent = "mV·s";
+  $("#unit-cannabis").textContent = "mV·s";
+  $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
+  $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
+  /* raw sensor-native values for calibration */
+  $("#sub-alcohol").textContent =
+    `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
+  $("#sub-cannabis").textContent =
+    `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
   setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
   setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
   result.test_result === "PASS" ? sndPass() : sndFail();
-  if (!result.demo_clean && result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
+  if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
 
 /* Browser-captured photo (canvas) takes priority; otherwise fall back to the
@@ -777,7 +765,22 @@ function bindEvents() {
   bindSettings();
 }
 
+/* Kiosk touchscreen: block every zoom gesture. touch-action in CSS handles
+   most of it; these cover pinch (multi-touch) and mouse/keyboard zoom too. */
+function blockZoom() {
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches.length > 1) e.preventDefault();   // pinch — single-finger scroll untouched
+  }, { passive: false });
+  ["gesturestart", "gesturechange", "gestureend"].forEach((type) =>
+    document.addEventListener(type, (e) => e.preventDefault()));
+  document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "0"].includes(e.key)) e.preventDefault();
+  });
+}
+
 async function boot() {
+  blockZoom();
   bindEvents();
   tickClock();
   setInterval(tickClock, 1000);

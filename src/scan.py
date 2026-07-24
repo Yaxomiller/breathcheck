@@ -15,13 +15,13 @@ from src import config
 
 
 def new_receipt(counter: int, now: Optional[datetime] = None) -> str:
-    now = now or datetime.now()
+    now = now or config.now_local()
     return f"R{now.strftime('%y%m%d')}-{counter:04d}"
 
 
 def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
                  now: Optional[datetime] = None) -> dict[str, Any]:
-    now = now or datetime.now()
+    now = now or config.now_local()
     alcohol_limit = float(settings.get("alcohol_limit", config.DEFAULT_ALCOHOL_LIMIT))
     cannabis_limit = float(settings.get("cannabis_limit", config.DEFAULT_CANNABIS_LIMIT))
     alcohol_value = cycle.alcohol.integral_mvs
@@ -52,20 +52,6 @@ def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
         "test_date": now.strftime("%Y-%m-%d"),
         "test_time": now.strftime("%H:%M:%S"),
     }
-    # TEMPORARY demo override (HH_DEMO_FORCE_CLEAN=1): report clean regardless
-    # of the real reading. The cycle still ran.
-    if config.DEMO_FORCE_CLEAN:
-        result.update({
-            "alcohol_bac": 0.0, "cannabis_ppb": 0.0,
-            "alcohol_baseline": 0.0, "alcohol_peak": 0.0,
-            "cannabis_baseline": 0.0, "cannabis_peak": 0.0,
-            "alcohol_baseline_raw": 0.0, "alcohol_peak_raw": 0.0,
-            "cannabis_baseline_raw": 0.0, "cannabis_peak_raw": 0.0,
-            "baseline_stable": True,
-            "alcohol_flag": "NO", "cannabis_flag": "NO",
-            "test_result": "PASS",
-            "demo_clean": True,
-        })
     return result
 
 
@@ -73,7 +59,7 @@ def record_from_result(result: dict, session: dict, fields: dict,
                         now: Optional[datetime] = None) -> dict[str, Any]:
     """Assemble a DB record from a completed result, the scan session
     (receipt/counter/device identity) and the officer-entered fields."""
-    now = now or datetime.now()
+    now = now or config.now_local()
     record = {
         "receipt_id": session["receipt_id"],
         "area": session.get("area", ""),

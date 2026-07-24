@@ -124,7 +124,7 @@ class TimeIn(BaseModel):
 
 @app.get("/api/status")
 def status() -> dict[str, Any]:
-    now = datetime.now()
+    now = config.now_local()
     settings = db.get_settings()
     stabilize = dict(getattr(_analyzer, "last_stabilize", {}))
     stabilize_started_at = getattr(_analyzer, "stabilize_started_at", None)
@@ -206,7 +206,7 @@ def scan_start() -> dict[str, Any]:
     settings = db.get_settings()
     seconds = max(3, int(float(settings.get("scan_seconds", "10"))))
     counter = db.next_counter()
-    now = datetime.now()
+    now = config.now_local()
     receipt_id = f"R{now.strftime('%y%m%d')}-{counter:04d}"
     session_id = uuid.uuid4().hex[:12]
 
@@ -288,7 +288,7 @@ def save_record(record: RecordIn) -> dict[str, Any]:
 
     data = record.model_dump(exclude={"photo_b64"})
     data["photo_file"] = photo_file
-    data["created_at"] = datetime.now().isoformat(timespec="seconds")
+    data["created_at"] = config.now_local().isoformat(timespec="seconds")
     try:
         record_id = db.insert_record(data)
     except Exception as exc:
@@ -440,7 +440,7 @@ def export_csv() -> StreamingResponse:
     for row in rows:
         writer.writerow([row.get(column, "") for column in header])
     buffer.seek(0)
-    filename = f"breathcheck_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"breathcheck_{config.now_local().strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv",

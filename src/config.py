@@ -7,7 +7,17 @@ build runs on a development PC (mock sensor, mock GPS) and on the road unit
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# The unit runs in India; show and stamp everything in IST (UTC+5:30, no DST)
+# regardless of the device's system timezone.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def now_local() -> datetime:
+    """Current wall-clock time in IST, as a naive datetime (clean strftime)."""
+    return datetime.now(IST).replace(tzinfo=None)
 
 
 def _str(name: str, default: str) -> str:
@@ -43,13 +53,6 @@ WEB_PORT = _int("HH_WEB_PORT", 8000)
 # --- Breath analyzer -------------------------------------------------------
 # "mock" on a PC, "spi" on the device with the sensor board attached.
 ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()
-
-# TEMPORARY demo override: force every scan to report a clean result
-# (alcohol 0 BAC, cannabis "no presence", PASS) regardless of the real
-# sensor reading. Set HH_DEMO_FORCE_CLEAN=1 to enable for a demo; remove
-# it (or set 0) to return to real detection. The full scan cycle still
-# runs — only the displayed/stored result is overridden.
-DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "0").lower() in {"1", "true", "yes", "on"}
 
 # Measurement cycle (seconds). The blow window itself is the officer-visible
 # "scan time" setting; purge/baseline are hardware timings.
