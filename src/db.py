@@ -190,6 +190,15 @@ def get_record(record_id: int) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_record_by_receipt(receipt_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = _db().execute(
+            "SELECT * FROM records WHERE receipt_id = ? ORDER BY id DESC LIMIT 1",
+            (receipt_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def all_records() -> list[dict[str, Any]]:
     with _lock:
         rows = _db().execute("SELECT * FROM records ORDER BY id").fetchall()

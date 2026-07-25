@@ -37,7 +37,7 @@ apt-get install -y ffmpeg || echo "WARN: ffmpeg not installed — USB-camera pho
 echo "==> Python environment"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install -r "$APP_DIR/requirements.txt" python-periphery pyserial
+"$VENV/bin/pip" install -r "$APP_DIR/requirements.txt" python-periphery pyserial python-escpos
 
 echo "==> Device configuration"
 if [[ -f $ENV_FILE ]]; then

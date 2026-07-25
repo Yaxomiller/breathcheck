@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src import analyzer as analyzer_module
-from src import camera, config, db, device, scan
+from src import camera, config, db, device, printer, scan
 from src.gps import GpsProvider
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
@@ -124,6 +124,11 @@ class TimeIn(BaseModel):
     datetime: str  # "YYYY-MM-DD HH:MM:SS"
 
 
+class PrintIn(BaseModel):
+    record_id: Optional[int] = None
+    receipt_id: Optional[str] = None
+
+
 # --- Status -------------------------------------------------------------------
 
 @app.get("/api/status")
@@ -150,6 +155,7 @@ def status() -> dict[str, Any]:
         "set_no": settings.get("set_no", ""),
         "sensor_state": _analyzer.state,
         "stream_ok": bool(getattr(_analyzer, "stream_ok", True)),
+        "printer_mode": config.PRINTER_MODE,
         "stabilize": stabilize,
         "purge_seconds": config.PURGE_SECONDS,
         "baseline_seconds": config.BASELINE_SECONDS,
@@ -316,6 +322,23 @@ def record_detail(record_id: int) -> dict[str, Any]:
     if record.get("photo_file"):
         record["photo_url"] = f"/photos/{record['photo_file']}"
     return record
+
+
+@app.post("/api/print")
+def print_receipt(body: PrintIn) -> dict[str, Any]:
+    """Print a saved test on the ESC/POS serial thermal printer."""
+    record = None
+    if body.record_id is not None:
+        record = db.get_record(body.record_id)
+    elif body.receipt_id:
+        record = db.get_record_by_receipt(body.receipt_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    ok, message = printer.print_record(record, db.get_settings())
+    if not ok:
+        raise HTTPException(status_code=503, detail=message)
+    return {"ok": True, "message": message}
 
 
 @app.delete("/api/records")

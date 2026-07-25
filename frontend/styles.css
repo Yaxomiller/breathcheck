@@ -458,6 +458,7 @@ main { flex: 1; position: relative; overflow: hidden; }
   border-radius: 12px; margin-bottom: 14px;
   border: 1px solid var(--line);
 }
+.modal-actions { margin-top: 16px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
 .detail-grid .auto-item b { font-size: 15px; }
 .detail-wide { grid-column: 1 / -1; }

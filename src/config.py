@@ -127,6 +127,19 @@ CAMERA_STREAM_HEIGHT = _int("HH_CAMERA_STREAM_HEIGHT", 480)
 CAMERA_STREAM_FPS = _int("HH_CAMERA_STREAM_FPS", 12)
 CAMERA_STREAM_QUALITY = _int("HH_CAMERA_STREAM_QUALITY", 75)
 
+# --- Thermal receipt printer ------------------------------------------------
+# "serial" drives an ESC/POS printer over a serial port (python-escpos);
+# "mock" logs the receipt text (dev machines); "off" disables printing.
+PRINTER_MODE = _str("HH_PRINTER_MODE", "mock").lower()
+PRINTER_DEVICE = _str("HH_PRINTER_DEVICE", "/dev/ttyUSB0")
+PRINTER_BAUD = _int("HH_PRINTER_BAUD", 9600)
+PRINTER_FEED_LINES = _int("HH_PRINTER_FEED_LINES", 5)   # blank lines after the receipt
+# Receipt header / device identity (printed on every receipt).
+PRINT_DEVICE_NAME = _str("HH_PRINT_DEVICE_NAME", APP_NAME.upper())
+PRINT_STATION_NAME = _str("HH_STATION_NAME", "")
+PRINT_STATION_ADDRESS = _str("HH_STATION_ADDRESS", "")
+PRINT_SERIAL_NUMBER = _str("HH_SERIAL_NUMBER", "")   # blank -> falls back to SET NO
+
 # --- GPS --------------------------------------------------------------------
 # "mock" on a PC, "nmea" with a serial GPS module, "off" to disable.
 GPS_MODE = _str("HH_GPS_MODE", "mock").lower()

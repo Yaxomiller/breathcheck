@@ -508,6 +508,7 @@ async function saveRecord() {
       photo_b64: state.photoData,
     });
     buildPrintReceipt(saved.receipt_id, name);
+    state.savedId = saved.id;
     $("#saved-receipt").textContent = saved.receipt_id;
     stopCamera();
     showScreen("saved");
@@ -516,6 +517,23 @@ async function saveRecord() {
     toast(err.message, true);
   } finally {
     button.disabled = false;
+  }
+}
+
+/* Print on the ESC/POS serial thermal printer (backend-driven; the kiosk
+   has no browser-printable output). */
+async function printReceipt(recordId, button) {
+  if (!recordId) { toast("NOTHING TO PRINT", true); return; }
+  const label = button ? button.textContent : "";
+  if (button) { button.disabled = true; button.textContent = "PRINTING…"; }
+  try {
+    const res = await postJson("/api/print", { record_id: recordId });
+    toast(res.message || "PRINTED");
+    beep(1200, 60);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = label; }
   }
 }
 
@@ -598,7 +616,12 @@ async function openRecordDetail(id) {
         ${fields.map(([label, value, cls]) =>
           `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${escapeHtml(value) || "--"}</b></div>`).join("")}
         <div class="auto-item detail-wide"><span>ADDRESS</span><b>${escapeHtml(record.address) || "--"}</b></div>
+      </div>
+      <div class="row-buttons modal-actions">
+        <button id="modal-print" class="btn-primary">PRINT</button>
       </div>`;
+    $("#modal-print").addEventListener("click", () =>
+      printReceipt(record.id, $("#modal-print")));
     $("#modal").classList.remove("hidden");
   } catch (err) {
     toast(err.message, true);
@@ -756,7 +779,7 @@ function bindEvents() {
   $("#f-name").addEventListener("input", () => $("#f-name").classList.remove("invalid"));
 
   $("#btn-done").addEventListener("click", goHome);
-  $("#btn-print").addEventListener("click", () => window.print());
+  $("#btn-print").addEventListener("click", () => printReceipt(state.savedId, $("#btn-print")));
 
   let searchTimer = null;
   $("#db-search").addEventListener("input", (event) => {
