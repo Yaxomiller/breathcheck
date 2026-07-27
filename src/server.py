@@ -69,6 +69,12 @@ _sessions_lock = threading.Lock()
 _MAX_SESSIONS = 50
 
 
+@app.on_event("shutdown")
+def _release_hardware() -> None:
+    """Stop the pump when uvicorn shuts down gracefully."""
+    _analyzer.shutdown()
+
+
 # --- Models -----------------------------------------------------------------
 
 class RecordIn(BaseModel):

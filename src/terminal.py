@@ -251,7 +251,11 @@ class Terminal:
 
 
 def run() -> None:
+    terminal = Terminal()
     try:
-        Terminal().run()
+        terminal.run()
     except KeyboardInterrupt:
         print("\nBye.")
+    finally:
+        # Quitting must never leave the pump powered.
+        terminal.analyzer.shutdown()

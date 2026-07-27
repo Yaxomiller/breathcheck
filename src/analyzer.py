@@ -43,10 +43,13 @@ purge handles the pump-airflow step from a settled starting point.
 """
 from __future__ import annotations
 
+import atexit
 import importlib
 import logging
 import math
+import os
 import random
+import signal
 import struct
 import threading
 import time
@@ -137,6 +140,9 @@ class BreathAnalyzer:
 
     def stabilize(self) -> None:
         """App-start priming; no-op for the mock."""
+
+    def shutdown(self) -> None:
+        """Release hardware safely on exit; no-op for the mock."""
 
 
 def _mock_bell(measure_ms: float, baseline: float, peak_delta: float,
@@ -496,6 +502,14 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         if progress:
                             progress(phase, elapsed, total)
             finally:
+                # Stop the pump FIRST. It is a direct GPIO write that needs no
+                # board traffic, whereas the PID-off handshake below can block
+                # for a long time on a slow or wedged board — leaving the pump
+                # audibly running long after the test finished.
+                try:
+                    self.pump.write(False)
+                except Exception:
+                    logger.exception("could not stop the pump")
                 # The test itself is over; the PID-off handshake below can
                 # take seconds (lamp shutdown makes the STM32 busy). Expose
                 # "finishing" so scan screens don't read it as a live test —
@@ -507,11 +521,30 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     self._send_commands([CMD_PID_SHUTDOWN])
                 except Exception:
                     pass
+                self.state = "ready"
+
+    def shutdown(self) -> None:
+        """Stop the pump and release the GPIO/SPI lines.
+
+        Without this, stopping or restarting the backend mid-scan leaves the
+        pump powered: the kernel releases the line on process exit and it
+        reverts to an undriven input, so nothing holds the pump off. Drive it
+        low explicitly BEFORE closing anything.
+        """
+        for name in ("pump", "trigger"):
+            line = getattr(self, name, None)
+            if line is not None:
                 try:
-                    self.pump.write(False)
+                    line.write(False)
+                except Exception:
+                    logger.warning("could not drive %s low on shutdown", name)
+        for name in ("pump", "trigger", "ready", "spi"):
+            resource = getattr(self, name, None)
+            if resource is not None:
+                try:
+                    resource.close()
                 except Exception:
                     pass
-                self.state = "ready"
 
     def _build_result(self, stats: dict) -> CycleResult:
         def channel(source: int) -> ChannelResult:
@@ -531,11 +564,41 @@ class SpiBreathAnalyzer(BreathAnalyzer):
 def resolve_analyzer() -> BreathAnalyzer:
     if config.ANALYZER_MODE in {"spi", "live", "hardware"}:
         try:
-            return SpiBreathAnalyzer()
+            analyzer = SpiBreathAnalyzer()
         except Exception as exc:
             return MockAnalyzer(
                 startup_warnings=(
                     f"SPI breath board unavailable ({exc}). Using mock readings.",
                 )
             )
+        # Never leave the pump powered if the process exits (service stop or
+        # restart, Ctrl-C, unhandled error) — the released GPIO would float.
+        atexit.register(analyzer.shutdown)
+        _install_signal_shutdown(analyzer)
+        return analyzer
     return MockAnalyzer()
+
+
+def _install_signal_shutdown(analyzer: BreathAnalyzer) -> None:
+    """Stop the pump on SIGTERM/SIGINT (systemctl stop/restart, Ctrl-C).
+
+    atexit alone is not enough: the default SIGTERM handler exits without
+    running atexit callbacks. Chains to the previous handler so uvicorn still
+    performs its own graceful shutdown.
+    """
+    def handler(signum, frame, _previous):
+        try:
+            analyzer.shutdown()
+        finally:
+            if callable(_previous):
+                _previous(signum, frame)
+            elif _previous == signal.SIG_DFL:
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous = signal.getsignal(sig)
+            signal.signal(sig, lambda s, f, p=previous: handler(s, f, p))
+        except (ValueError, OSError):
+            pass   # not the main thread / unsupported platform
