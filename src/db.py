@@ -158,13 +158,28 @@ def next_counter() -> int:
 # --- Records ------------------------------------------------------------------
 
 def insert_record(data: dict[str, Any]) -> int:
+    """Insert a record, or update the existing row with the same receipt_id.
+
+    Every completed scan is logged immediately, so the officer's later save
+    of the subject's details must amend that row rather than collide with
+    its UNIQUE receipt_id.
+    """
     columns = [field for field in RECORD_FIELDS if field in data]
     placeholders = ", ".join("?" for _ in columns)
-    sql = f"INSERT INTO records ({', '.join(columns)}) VALUES ({placeholders})"
+    updates = ", ".join(f"{c}=excluded.{c}" for c in columns if c != "receipt_id")
+    sql = (
+        f"INSERT INTO records ({', '.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(receipt_id) DO UPDATE SET {updates}"
+    ) if updates else (
+        f"INSERT OR IGNORE INTO records ({', '.join(columns)}) VALUES ({placeholders})"
+    )
     with _lock:
-        cursor = _db().execute(sql, [data[c] for c in columns])
+        _db().execute(sql, [data[c] for c in columns])
         _db().commit()
-    return int(cursor.lastrowid)
+        row = _db().execute(
+            "SELECT id FROM records WHERE receipt_id = ?", (data.get("receipt_id"),)
+        ).fetchone()
+    return int(row["id"]) if row else 0
 
 
 def list_records(query: str = "", limit: int = 500) -> list[dict[str, Any]]:

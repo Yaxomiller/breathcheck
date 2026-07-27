@@ -204,6 +204,15 @@ def _run_scan(session_id: str, measure_seconds: float, receipt_id: str, photo_se
         result = scan.build_result(cycle, settings)
         # Persist the exhale ADC trace next to the record.
         result["curve_file"] = scan.save_curve(receipt_id, cycle)
+        # Log every reading straight away, so the database holds an entry for
+        # each test even if the officer never fills in the subject's details.
+        # Saving the form later amends this same row (upsert on receipt_id).
+        with _sessions_lock:
+            session = dict(_sessions.get(session_id) or {})
+        try:
+            db.insert_record(scan.record_from_result(result, session, {}))
+        except Exception:
+            logger.exception("could not log scan %s to the database", receipt_id)
         update = {"status": "done", "result": result}
     except Exception as exc:
         logger.exception("Scan %s failed", session_id)
@@ -231,6 +240,7 @@ def scan_start() -> dict[str, Any]:
 
     photo_second = max(1, int(float(settings.get("photo_second", "4"))))
 
+    fix = _gps.read()
     session = {
         "status": "running",
         "receipt_id": receipt_id,
@@ -242,6 +252,15 @@ def scan_start() -> dict[str, Any]:
         "phase_at": time.time(),
         "photo_captured": False,
         "started_at": now.isoformat(timespec="seconds"),
+        # Device identity, kept so the auto-logged record is complete even
+        # before the officer fills in the subject's details.
+        "area": settings.get("area", ""),
+        "version": settings.get("version", config.APP_VERSION),
+        "set_no": settings.get("set_no", ""),
+        "calibr_date": settings.get("calibr_date", ""),
+        "testing_mode": settings.get("testing_mode", "ACTIVE"),
+        "gps1": str(fix["lat"]) if fix.get("fix") else "",
+        "gps2": str(fix["lon"]) if fix.get("fix") else "",
     }
     with _sessions_lock:
         if len(_sessions) > _MAX_SESSIONS:
