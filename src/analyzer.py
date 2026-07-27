@@ -229,9 +229,14 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         # state. The stabilize pass below rebuilds its zero/baseline state.
         self.trigger = self.periphery.GPIO(config.GPIO_CHIP, config.BOARD_ENABLE_GPIO, "high")
         self.ready = self.periphery.GPIO(config.GPIO_CHIP, config.READY_GPIO, "in", edge="falling")
-        self.pump = self.periphery.GPIO(config.GPIO_CHIP, config.PUMP_GPIO, "out")
-        self.spi = self.periphery.SPI(config.SPI_DEVICE, config.SPI_MODE, config.SPI_SPEED_HZ)
+        # "low" requests the pump line as an output ALREADY driven low, in one
+        # atomic step. Plain "out" leaves the initial level to the board, and
+        # on this unit it comes up HIGH — which runs the pump from the moment
+        # the app opens the line. Drive it low again immediately, and do it
+        # before the SPI bus is opened so no slow call widens that window.
+        self.pump = self.periphery.GPIO(config.GPIO_CHIP, config.PUMP_GPIO, "low")
         self.pump.write(False)
+        self.spi = self.periphery.SPI(config.SPI_DEVICE, config.SPI_MODE, config.SPI_SPEED_HZ)
         self._reset_board()
         self._last_frame_at = time.monotonic()
         threading.Thread(target=self._keepalive_loop, daemon=True).start()
