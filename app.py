@@ -4,6 +4,7 @@
   python app.py serve      server only (for development / remote browser)
   python app.py kiosk      server + fullscreen kiosk browser window
   python app.py term       text UI over SSH — no browser (alias: cli, simple)
+  python app.py testprint  print a sample receipt to test the printer
 
 Options:
   --port 8000              override the web port
@@ -44,7 +45,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="BreathCheck handheld analyzer")
     parser.add_argument(
         "mode", nargs="?", default="kiosk",
-        choices=["kiosk", "serve", "web", "term", "cli", "simple"],
+        choices=["kiosk", "serve", "web", "term", "cli", "simple", "testprint"],
     )
     parser.add_argument("--host", default=config.WEB_HOST)
     parser.add_argument("--port", type=int, default=config.WEB_PORT)
@@ -54,6 +55,14 @@ def main() -> None:
         from src import terminal
         terminal.run()
         return
+
+    if args.mode == "testprint":
+        from src import printer
+        print(printer.build_receipt_text(printer.sample_record(), {}))
+        print("-" * 40)
+        ok, message = printer.print_sample()
+        print(f"[{config.PRINTER_MODE}] {message}")
+        raise SystemExit(0 if ok else 1)
 
     db.init_db()
 
