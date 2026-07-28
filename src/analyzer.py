@@ -535,14 +535,19 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         pump powered: the kernel releases the line on process exit and it
         reverts to an undriven input, so nothing holds the pump off. Drive it
         low explicitly BEFORE closing anything.
+
+        BRD_ON is deliberately NOT driven low: the board is meant to stay
+        powered so the STM32 keeps the zero-offset calibration it performs at
+        its own boot. Cutting power here would cold-boot it on every service
+        restart, and the next start can hit the bus before that calibration
+        finishes — which surfaces as "no signal from sensor".
         """
-        for name in ("pump", "trigger"):
-            line = getattr(self, name, None)
-            if line is not None:
-                try:
-                    line.write(False)
-                except Exception:
-                    logger.warning("could not drive %s low on shutdown", name)
+        pump = getattr(self, "pump", None)
+        if pump is not None:
+            try:
+                pump.write(False)
+            except Exception:
+                logger.warning("could not drive the pump low on shutdown")
         for name in ("pump", "trigger", "ready", "spi"):
             resource = getattr(self, name, None)
             if resource is not None:
