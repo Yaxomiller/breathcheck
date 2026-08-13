@@ -154,10 +154,57 @@ class CameraStreamer:
         self._reader: Optional[threading.Thread] = None
         self._latest: Optional[bytes] = None
         self._stop = threading.Event()
+        self._viewers = 0
+        self._idle_since: Optional[float] = time.monotonic()
+        self._reaper: Optional[threading.Thread] = None
 
     def is_running(self) -> bool:
         with self._lock:
             return self._proc is not None and self._proc.poll() is None
+
+    # ---- viewer tracking ------------------------------------------------
+    # The pipeline is expensive (decode + scale + rotate + JPEG encode per
+    # frame). Run it only while a preview is actually being watched.
+
+    def acquire(self) -> bool:
+        """Register a viewer and make sure the pipeline is running."""
+        with self._lock:
+            self._viewers += 1
+            self._idle_since = None
+        started = self.ensure_started()
+        if not started:
+            self.release()
+        return started
+
+    def release(self) -> None:
+        """Drop a viewer; the reaper stops the pipeline once idle."""
+        with self._lock:
+            self._viewers = max(0, self._viewers - 1)
+            if self._viewers == 0:
+                self._idle_since = time.monotonic()
+
+    def _start_reaper(self) -> None:
+        if self._reaper is not None and self._reaper.is_alive():
+            return
+
+        def reap() -> None:
+            while True:
+                time.sleep(1.0)
+                with self._lock:
+                    running = self._proc is not None and self._proc.poll() is None
+                    idle_since = self._idle_since
+                    viewers = self._viewers
+                if not running:
+                    return
+                if viewers == 0 and idle_since is not None \
+                        and time.monotonic() - idle_since >= config.CAMERA_IDLE_STOP_SECONDS:
+                    logger.info("camera idle for %.0fs — stopping the capture pipeline",
+                                config.CAMERA_IDLE_STOP_SECONDS)
+                    self.stop()
+                    return
+
+        self._reaper = threading.Thread(target=reap, daemon=True)
+        self._reaper.start()
 
     def _stream_argv(self, mode: str, device: str) -> Optional[list[str]]:
         capture_w, capture_h = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
@@ -264,6 +311,7 @@ class CameraStreamer:
                 self._reader = threading.Thread(target=self._read_loop, args=(proc,), daemon=True)
                 self._reader.start()
                 logger.info("camera stream started (%s %s)", probed[0], probed[1])
+        self._start_reaper()
         return self._wait_for_first_frame(proc)
 
     def _read_loop(self, proc: subprocess.Popen) -> None:

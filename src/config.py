@@ -93,6 +93,12 @@ RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
 # Alcohol-cell stabilization at app start (fresh-air settle).
+# Disabled by default: the settle wait blocked scanning for up to
+# STABILIZE_MAX_S, which is too long in the field. With it off the AFE is
+# still started at boot (the doorbell stream depends on it) — only the
+# wait-for-drift-to-settle step is skipped, so the first reading of a cold
+# session may drift more. Set HH_WARMUP_ENABLED=1 to restore it.
+WARMUP_ENABLED = _str("HH_WARMUP_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 SETTLE_SLOPE_NA_S = _float("HH_SETTLE_SLOPE_NA_S", 30.0)
 SETTLE_WINDOW_MS = _float("HH_SETTLE_WINDOW_MS", 10000.0)
 STABILIZE_MAX_S = _float("HH_STABILIZE_MAX_S", 180.0)
@@ -133,6 +139,11 @@ CAMERA_STREAM_WIDTH = _int("HH_CAMERA_STREAM_WIDTH", 640)
 CAMERA_STREAM_HEIGHT = _int("HH_CAMERA_STREAM_HEIGHT", 480)
 CAMERA_STREAM_FPS = _int("HH_CAMERA_STREAM_FPS", 12)
 CAMERA_STREAM_QUALITY = _int("HH_CAMERA_STREAM_QUALITY", 75)
+# Stop the capture pipeline once no one has been watching for this long.
+# Without it the pipeline keeps decoding, scaling and JPEG-encoding every
+# frame for the life of the process, which is a constant CPU load on the
+# handheld and makes the whole UI stutter.
+CAMERA_IDLE_STOP_SECONDS = _float("HH_CAMERA_IDLE_STOP_SECONDS", 8.0)
 
 # --- Thermal receipt printer ------------------------------------------------
 # "serial" drives an ESC/POS printer over a serial port (python-escpos);

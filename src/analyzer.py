@@ -84,12 +84,31 @@ BASELINE_SPREAD_WARN = {SRC_AD5941: 200,   # nA
 ProgressFn = Callable[[str, float, float], None]
 
 
-def crc16_ccitt(data: bytes) -> int:
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= byte << 8
+def _build_crc16_table() -> tuple[int, ...]:
+    table = []
+    for byte in range(256):
+        crc = byte << 8
         for _ in range(8):
             crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+        table.append(crc)
+    return tuple(table)
+
+
+_CRC16_TABLE = _build_crc16_table()
+
+
+def crc16_ccitt(data: bytes) -> int:
+    """CRC-16/CCITT-FALSE, table driven.
+
+    Every 246-byte frame is checksummed, and the keepalive checks frames
+    continuously. The bit-by-bit form cost ~2000 Python iterations per frame
+    and held the GIL, stalling the web server; the table costs one lookup per
+    byte instead.
+    """
+    crc = 0xFFFF
+    table = _CRC16_TABLE
+    for byte in data:
+        crc = ((crc << 8) & 0xFFFF) ^ table[((crc >> 8) ^ byte) & 0xFF]
     return crc
 
 
@@ -362,6 +381,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             self.stabilize_started_at = time.time()
             samples: list[tuple[int, int]] = []   # (stm32_ms, nA)
             settled = False
+            skipped = False
             recovered = False
             error: Optional[str] = None
             started = self.stabilize_started_at
@@ -373,6 +393,12 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     self._reset_board()
                     if not self._send_commands(startup_commands):
                         raise RuntimeError("sensor board produced no frames after hardware reset")
+                if not config.WARMUP_ENABLED:
+                    # AFE sampling is now running (the doorbell stream needs
+                    # it); skip the wait for the baseline drift to settle so
+                    # the unit is ready to scan immediately.
+                    skipped = True
+                    return
                 last_eval = 0.0
                 ok_streak = 0
                 while time.time() - started < config.STABILIZE_MAX_S:
@@ -416,6 +442,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     pass
                 self.last_stabilize = {
                     "settled": settled,
+                    "skipped": skipped,
                     "final_ua": round(samples[-1][1] / 1000.0, 3) if samples else None,
                     "elapsed_s": round(time.time() - started, 1),
                     "hardware_reset": recovered,
