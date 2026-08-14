@@ -676,6 +676,18 @@ async function refreshCalibration() {
 function renderCalibration(cal) {
   const running = cal.status === "running";
 
+  /* Never let simulated numbers pass as a real calibration. */
+  const mode = $("#cal-mode");
+  if (cal.sensor_live) {
+    mode.className = "cal-mode live";
+    mode.innerHTML = "REAL SENSOR (SPI) — readings come from the board";
+  } else {
+    mode.className = "cal-mode sim";
+    mode.innerHTML = `SIMULATED DATA — SENSOR NOT CONNECTED (${cal.analyzer || "mock"})` +
+      `<small>${(cal.sensor_warnings && cal.sensor_warnings[0]) ||
+        "The board could not be opened, so any calibration here is meaningless."}</small>`;
+  }
+
   const message = $("#cal-message");
   message.textContent = cal.message || "";
   message.classList.toggle("err", cal.status === "error");

@@ -497,23 +497,33 @@ def put_settings(update: SettingsIn) -> dict[str, Any]:
 
 # --- TEMPORARY: calibration procedure ------------------------------------------------
 
+def _calibration_payload() -> dict[str, Any]:
+    """Calibration state plus which sensor source is behind it, so the screen
+    can never quietly present simulated numbers as a real calibration."""
+    payload = calibration.session.snapshot()
+    payload["analyzer"] = _analyzer.name
+    payload["sensor_live"] = _analyzer.name == "spi"
+    payload["sensor_warnings"] = list(_analyzer.startup_warnings)
+    return payload
+
+
 @app.get("/api/calibration")
 def calibration_status() -> dict[str, Any]:
-    return calibration.session.snapshot()
+    return _calibration_payload()
 
 
 @app.post("/api/calibration/{step}")
 def calibration_start(step: str) -> dict[str, Any]:
     if step == "reset":
         calibration.session.reset()
-        return calibration.session.snapshot()
+        return _calibration_payload()
     if _analyzer.name != "spi":
-        # Mock analyzers can still run the flow (compressed timings) for UI work.
-        logger.info("calibration '%s' running against the %s analyzer", step, _analyzer.name)
+        logger.warning("calibration '%s' started against the %s analyzer — "
+                       "results are SIMULATED, not from the sensor board", step, _analyzer.name)
     ok, message = calibration.session.start(_analyzer, step)
     if not ok:
         raise HTTPException(status_code=409, detail=message)
-    return calibration.session.snapshot()
+    return _calibration_payload()
 
 
 @app.post("/api/time")
