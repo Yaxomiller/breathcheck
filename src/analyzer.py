@@ -678,6 +678,13 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         restart, and the next start can hit the bus before that calibration
         finishes — which surfaces as "no signal from sensor".
         """
+        # Idempotent: this runs from an explicit call, atexit and the signal
+        # handler, and writing to an already-closed line would otherwise log
+        # an alarming failure after a perfectly clean shutdown.
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+
         pump = getattr(self, "pump", None)
         if pump is not None:
             try:
