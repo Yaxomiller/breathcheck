@@ -30,11 +30,39 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+ENV_FILE = os.environ.get("HH_ENV_FILE", "/etc/breathcheck.env")
+
+
+def _load_env_file(path: str) -> bool:
+    """Apply /etc/breathcheck.env the way the systemd service does.
+
+    Run by hand the process inherits none of it, so HH_ANALYZER_MODE would
+    fall back to 'mock' and the script would refuse to run on a unit that is
+    wired up perfectly well. Must happen before src.config is imported, since
+    that reads the environment at import time. Real environment variables win.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return False
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    return True
+
+
+ENV_LOADED = _load_env_file(ENV_FILE)
 
 from src import analyzer as analyzer_module   # noqa: E402
 from src import config                        # noqa: E402
@@ -163,15 +191,33 @@ def main() -> int:
     print(" BreathCheck sensor calibration")
     print("=" * 60)
 
+    print(f"\nconfig  : {ENV_FILE}" + ("" if ENV_LOADED else "  (NOT FOUND)"))
+    print(f"mode    : HH_ANALYZER_MODE={config.ANALYZER_MODE}")
+
     analyzer = analyzer_module.resolve_analyzer()
     if analyzer.name != "spi":
         print(f"\n!! analyzer is '{analyzer.name}', not the sensor board.")
         for warning in analyzer.startup_warnings:
             print(f"   {warning}")
+        if config.ANALYZER_MODE not in {"spi", "live", "hardware"}:
+            # Never even tried the board.
+            print(f"\n   The sensor board was not attempted: HH_ANALYZER_MODE is"
+                  f" '{config.ANALYZER_MODE}'.")
+            if not ENV_LOADED:
+                print(f"   {ENV_FILE} was not found - point at it with"
+                      f" HH_ENV_FILE=/path/to/env")
+            else:
+                print(f"   Set HH_ANALYZER_MODE=spi in {ENV_FILE}, or run with:")
+                print("     sudo HH_ANALYZER_MODE=spi .venv/bin/python calibrate.py")
+        else:
+            # Tried and failed — something else holds the bus, or wiring.
+            print("\n   The board could not be opened. Usually the backend still")
+            print("   holds it ->  sudo systemctl stop breathcheck")
+            print("   (also check nothing else drives this board, e.g."
+                  " attendance-kiosk.service)")
         if not args.allow_mock:
-            print("\n   Any calibration would be SIMULATED. Common cause: the backend")
-            print("   still holds the bus ->  sudo systemctl stop breathcheck")
-            print("   Re-run with --allow-mock only to rehearse the flow.")
+            print("\n   Refusing to run: the numbers would be SIMULATED.")
+            print("   Use --allow-mock only to rehearse the flow.")
             return 2
         print("   --allow-mock given: continuing with FAKE data.\n")
 
