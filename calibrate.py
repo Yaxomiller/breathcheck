@@ -30,10 +30,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import os
 import sys
 import time
 from pathlib import Path
+
+# Show the driver's progress: without a handler only WARNING and above reach
+# the terminal, so the board handshake looks silent while it retries.
+logging.basicConfig(level=logging.INFO, format="   [sensor] %(message)s")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -228,6 +233,23 @@ def main() -> int:
     print(f"output  : {out_dir}")
     print(f"limits  : alcohol drift <= {config.CAL_BASELINE_MAX_DEV_NA} nA, "
           f"PID drift <= {config.CAL_BASELINE_MAX_DEV_MV} mV")
+
+    # Prime the board before anything else. With both channels off this
+    # firmware emits no doorbell frames, and commands can only ride on a
+    # frame -- so without this the first step's PID startup is never
+    # delivered. The service does the same thing at boot.
+    if analyzer.name == "spi":
+        print("\npriming sensor board (starting AFE sampling)...", flush=True)
+        started = time.monotonic()
+        analyzer.stabilize()
+        primed = getattr(analyzer, "last_stabilize", {}) or {}
+        took = time.monotonic() - started
+        if primed.get("error"):
+            print(f"   !! priming failed after {took:.0f}s: {primed['error']}")
+            print("      The board is not answering. Power-cycle the unit and retry.")
+            return 3
+        note = " (needed a hardware reset)" if primed.get("hardware_reset") else ""
+        print(f"   board ready in {took:.0f}s{note}")
 
     summary: list[tuple[str, str]] = [
         ("started_at", time.strftime("%Y-%m-%d %H:%M:%S")),

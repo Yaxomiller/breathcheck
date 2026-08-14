@@ -361,10 +361,18 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         Each command gets its own retry budget: a slow PID start must not use
         all the attempts before the alcohol AFE start command is sent."""
         for command in commands:
-            for _attempt in range(max_tries):
+            for attempt in range(max_tries):
                 _records, delivered = self._wait_frame(command, timeout=timeout)
                 if delivered:
+                    if attempt:
+                        logger.info("command 0x%02X delivered on attempt %d",
+                                    command, attempt + 1)
                     break
+                # Retries can each burn seconds on doorbell/deassert timeouts,
+                # so say something rather than going quiet for minutes.
+                if attempt and attempt % 3 == 0:
+                    logger.warning("command 0x%02X still unacknowledged (%d/%d)",
+                                   command, attempt + 1, max_tries)
             else:
                 logger.warning("command 0x%02X not delivered after %d frames",
                                command, max_tries)
