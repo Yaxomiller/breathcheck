@@ -238,11 +238,16 @@ class MockAnalyzer(BreathAnalyzer):
     def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
                         store: bool = True, pump_on: bool = True) -> dict[int, list[tuple[int, float]]]:
         """Simulated calibration sampling: a settled baseline with light noise,
-        so the procedure can be exercised without the sensor board."""
+        so the procedure can be exercised without the sensor board.
+
+        Runs in REAL time by default so the on-screen countdown is honest.
+        HH_MOCK_SPEEDUP>1 compresses it for UI work only.
+        """
         with self._lock:
             self.state = "measuring"
             try:
                 out = {SRC_AD7798: [], SRC_AD5941: []}
+                speedup = max(1.0, config.MOCK_SPEEDUP)
                 step_ms, started = 100, time.monotonic()
                 drift = random.uniform(-0.02, 0.02)
                 for t_ms in range(0, int(seconds * 1000) + 1, step_ms):
@@ -251,11 +256,10 @@ class MockAnalyzer(BreathAnalyzer):
                         out[SRC_AD7798].append((t_ms, 640 + random.uniform(-1.5, 1.5)))
                     if progress:
                         progress(min(t_ms / 1000.0, seconds), seconds)
-                    # Run at 20x so a 10-minute clean is testable in 30s.
-                    target = started + (t_ms / 1000.0) / 20.0
+                    target = started + (t_ms / 1000.0) / speedup
                     now = time.monotonic()
                     if target > now:
-                        time.sleep(min(0.05, target - now))
+                        time.sleep(min(0.1, target - now))
                 return out
             finally:
                 self.state = "ready"
@@ -597,10 +601,15 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         """
         with self._lock:
             self.state = "measuring"
-            total_ms = max(1.0, seconds) * 1000.0
             out: dict[int, list[tuple[int, float]]] = {SRC_AD7798: [], SRC_AD5941: []}
             t0: Optional[int] = None
-            wall_deadline = time.monotonic() + seconds + 60.0
+            # Calibration phases are wall-clock durations (a 10 minute purge
+            # must be 10 real minutes), so time and report against the clock.
+            # Sample timestamps still come from the STM32 tick domain, which is
+            # what the integral needs; driving the countdown from those ticks
+            # made it jump, since frames deliver records in batches.
+            started = time.monotonic()
+            no_frame_deadline = started + seconds + 60.0
             try:
                 if pump_on:
                     self.pump.write(True)
@@ -612,27 +621,29 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         self.pump.write(True)
                     if not self._send_commands(startup):
                         raise RuntimeError("sensor board produced no frames after hardware reset")
+                    started = time.monotonic()   # do not charge recovery to the run
+                    no_frame_deadline = started + seconds + 60.0
 
                 while True:
-                    if time.monotonic() > wall_deadline:
+                    elapsed = time.monotonic() - started
+                    if elapsed >= seconds:
+                        return out
+                    if time.monotonic() > no_frame_deadline:
                         raise RuntimeError("sensor board stopped responding")
+                    if progress:
+                        progress(min(elapsed, seconds), seconds)
                     records, _ = self._wait_frame()
                     if records is None:
                         continue
+                    no_frame_deadline = time.monotonic() + seconds + 60.0
                     for tick, source, value in records:
                         if source not in out:
                             continue
                         if t0 is None:
                             t0 = tick
-                        if tick < t0:
+                        if tick < t0 or not store:
                             continue
-                        dt = tick - t0
-                        if dt >= total_ms:
-                            return out
-                        if store:
-                            out[source].append((int(dt), float(value)))
-                        if progress:
-                            progress(dt / 1000.0, seconds)
+                        out[source].append((int(tick - t0), float(value)))
             finally:
                 try:
                     self.pump.write(False)

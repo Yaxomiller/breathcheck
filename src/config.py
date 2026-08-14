@@ -108,6 +108,9 @@ MOCK_ALCOHOL_MIN = _float("HH_MOCK_ALCOHOL_MIN", 0.0)
 MOCK_ALCOHOL_MAX = _float("HH_MOCK_ALCOHOL_MAX", 30.0)
 MOCK_CANNABIS_MIN = _float("HH_MOCK_CANNABIS_MIN", 0.0)
 MOCK_CANNABIS_MAX = _float("HH_MOCK_CANNABIS_MAX", 6.0)
+# Mock calibration runs in real time by default so the countdown is honest;
+# raise this only to compress long steps while working on the UI.
+MOCK_SPEEDUP = _float("HH_MOCK_SPEEDUP", 1.0)
 
 # --- Camera (server-side exhale-photo capture) ------------------------------
 # Chromium's getUserMedia cannot drive this board's MIPI/CSI camera (the
