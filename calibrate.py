@@ -210,7 +210,7 @@ def main() -> int:
                 print(f"   Set HH_ANALYZER_MODE=spi in {ENV_FILE}, or run with:")
                 print("     sudo HH_ANALYZER_MODE=spi .venv/bin/python calibrate.py")
         else:
-            # Tried and failed — something else holds the bus, or wiring.
+            # Tried and failed - something else holds the bus, or wiring.
             print("\n   The board could not be opened. Usually the backend still")
             print("   holds it ->  sudo systemctl stop breathcheck")
             print("   (also check nothing else drives this board, e.g."
