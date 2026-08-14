@@ -504,6 +504,7 @@ main { flex: 1; position: relative; overflow: hidden; }
 }
 .cal-result .ok { color: var(--good); }
 .cal-result .bad { color: var(--bad); }
+.cal-result .cal-note { color: var(--muted); font-size: 11.5px; font-weight: 600; }
 .cal-actions { padding-top: 4px; }
 
 /* ---------- on-screen keyboard ---------- */

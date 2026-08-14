@@ -10,18 +10,18 @@ module, its endpoints and the CALIBRATION button to remove the feature.
                  (100 nA for the AD5941 fuel cell, 100 mV for the AD7798 PID);
                  the mean is then saved as the zero.
 
-  Phase 2 - span (unlocked by a valid baseline)
-    SPAN     purge ethanol / target gas for 3-5 s, record a 10 s window from
-             the start and integrate the curve above the baseline (mV*s).
-             This integral is what correlates to PPM.
-    PLATEAU  for the sensor calibrated by level rather than area: introduce
-             the gas and wait for the reading to settle, then record the
-             constant value at the plateau.
+  Phase 2 - span (unlocked by a valid baseline), one step per sensor
+    ETHANOL -> ALCOHOL cell (AD5941). A puff of ethanol gives a transient
+             response, so the measure is the AREA: purge for 3-5 s, record a
+             10 s window from the start and integrate above the baseline
+             (mV*s). That integral is what correlates to PPM.
+    MYRCENE -> PID (AD7798). A sustained gas gives a steady response, so the
+             measure is the LEVEL: introduce myrcene and wait for the reading
+             to settle, then record the constant voltage at the plateau.
 
-Both span methods record BOTH channels, since the device exposes exactly two
-(AD5941 alcohol cell, AD7798 PID) and which method applies to which is the
-technician's call. Raw samples for every run are written to data/calibration
-as CSV so the numbers can be checked afterwards.
+Each step reports its own sensor as the calibration figure; the other channel
+is still logged alongside as a cross-check. Raw samples for every run are
+written to data/calibration as CSV so the numbers can be checked afterwards.
 """
 from __future__ import annotations
 
@@ -295,8 +295,10 @@ class CalibrationSession:
         self._update(status="done", baseline=baseline, message=message)
 
     def _run_span(self, analyzer: Any) -> None:
+        """Ethanol span for the ALCOHOL cell — measured as area (integral)."""
         samples = self._run(analyzer, "span", config.CAL_SPAN_SECONDS,
-                            "Purge ethanol NOW (3-5 s) — recording", store=True)
+                            "Purge ETHANOL now (3-5 s) — recording the alcohol cell",
+                            store=True)
         if samples is None:
             return
 
@@ -308,50 +310,56 @@ class CalibrationSession:
         alcohol_samples = samples.get(SRC_AD5941, [])
         pid_samples = samples.get(SRC_AD7798, [])
         span = {
+            "gas": "ethanol",
+            "sensor": "alcohol",
+            # The calibration figure for this step.
             "alcohol_integral_mvs": _integral_mvs(alcohol_samples, alcohol_base, SRC_AD5941),
-            "pid_integral_mvs": _integral_mvs(pid_samples, pid_base_codes, SRC_AD7798),
             "alcohol_peak_na": round(max((v for _t, v in alcohol_samples), default=0) - alcohol_base, 3),
-            "pid_peak_mv": round((max((v for _t, v in pid_samples), default=0) - pid_base_codes)
-                                 * PID_MV_PER_LSB, 4),
+            # Cross-check only — the PID is calibrated with myrcene.
+            "pid_integral_mvs": _integral_mvs(pid_samples, pid_base_codes, SRC_AD7798),
             "seconds": config.CAL_SPAN_SECONDS,
-            "csv": _save_csv("span", samples),
+            "csv": _save_csv("span_ethanol_alcohol", samples),
         }
         db.set_settings({
             "cal_span_alcohol_mvs": str(span["alcohol_integral_mvs"]),
-            "cal_span_pid_mvs": str(span["pid_integral_mvs"]),
+            "cal_span_gas": "ethanol",
             "cal_span_at": config.now_local().isoformat(timespec="seconds"),
         })
         self._update(status="done", span=span,
-                     message=f"Span recorded — alcohol {span['alcohol_integral_mvs']} mV*s, "
-                             f"PID {span['pid_integral_mvs']} mV*s. Saved.")
+                     message=f"Ethanol span recorded — alcohol cell "
+                             f"{span['alcohol_integral_mvs']} mV*s. Saved.")
 
     def _run_plateau(self, analyzer: Any) -> None:
+        """Myrcene calibration for the PID — measured as a settled level."""
         samples = self._run(analyzer, "plateau", config.CAL_PLATEAU_MAX_SECONDS,
-                            "Introduce the target gas — waiting for the reading to settle",
+                            "Introduce MYRCENE — waiting for the PID to settle",
                             store=True)
         if samples is None:
             return
 
-        alcohol = _find_plateau(samples.get(SRC_AD5941, []), SRC_AD5941)
         pid = _find_plateau(samples.get(SRC_AD7798, []), SRC_AD7798)
+        alcohol = _find_plateau(samples.get(SRC_AD5941, []), SRC_AD5941)
         plateau = {
-            "alcohol_settled": alcohol["settled"],
-            "alcohol_value_na": alcohol["value_raw"],
-            "alcohol_value_mv": alcohol["value_mv"],
+            "gas": "myrcene",
+            "sensor": "pid",
+            # The calibration figure for this step.
             "pid_settled": pid["settled"],
             "pid_value_codes": pid["value_raw"],
             "pid_value_mv": pid["value_mv"],
-            "csv": _save_csv("plateau", samples),
+            "pid_spread_codes": pid["spread_raw"],
+            # Cross-check only — the alcohol cell is calibrated with ethanol.
+            "alcohol_value_mv": alcohol["value_mv"],
+            "alcohol_settled": alcohol["settled"],
+            "csv": _save_csv("plateau_myrcene_pid", samples),
         }
         db.set_settings({
-            "cal_plateau_alcohol_mv": str(alcohol["value_mv"]),
             "cal_plateau_pid_mv": str(pid["value_mv"]),
+            "cal_plateau_gas": "myrcene",
             "cal_plateau_at": config.now_local().isoformat(timespec="seconds"),
         })
-        settled = "settled" if (alcohol["settled"] and pid["settled"]) else "NOT fully settled"
+        state = "settled" if pid["settled"] else "did NOT settle"
         self._update(status="done", plateau=plateau,
-                     message=f"Plateau {settled} — alcohol {alcohol['value_mv']} mV, "
-                             f"PID {pid['value_mv']} mV. Saved.")
+                     message=f"Myrcene plateau {state} — PID {pid['value_mv']} mV. Saved.")
 
 
 session = CalibrationSession()

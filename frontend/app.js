@@ -656,7 +656,10 @@ async function refreshGps() {
    (integral) / plateau (settled level). Each step runs on the backend; this
    polls its progress and unlocks the next button. */
 
-const CAL_STEP_NAMES = { clean: "CLEANING", baseline: "BASELINE", span: "SPAN", plateau: "PLATEAU" };
+const CAL_STEP_NAMES = {
+  clean: "CLEANING", baseline: "BASELINE",
+  span: "ETHANOL · ALCOHOL", plateau: "MYRCENE · PID",
+};
 
 function fmtClock(seconds) {
   const s = Math.max(0, Math.round(seconds));
@@ -710,8 +713,9 @@ function renderCalibration(cal) {
   spanBox.classList.toggle("hidden", !span);
   if (span) {
     spanBox.innerHTML =
-      `ALCOHOL integral <b>${span.alcohol_integral_mvs}</b> mV&middot;s (peak ${span.alcohol_peak_na} nA)<br>` +
-      `PID integral <b>${span.pid_integral_mvs}</b> mV&middot;s (peak ${span.pid_peak_mv} mV)`;
+      `ALCOHOL CELL integral <b class="ok">${span.alcohol_integral_mvs}</b> mV&middot;s ` +
+      `(peak ${span.alcohol_peak_na} nA)<br>` +
+      `<span class="cal-note">PID during ethanol ${span.pid_integral_mvs} mV&middot;s — cross-check only</span>`;
   }
 
   const plateau = cal.plateau;
@@ -720,8 +724,8 @@ function renderCalibration(cal) {
   if (plateau) {
     const mark = (ok) => `<span class="${ok ? "ok" : "bad"}">${ok ? "SETTLED" : "NOT SETTLED"}</span>`;
     plateauBox.innerHTML =
-      `ALCOHOL <b>${plateau.alcohol_value_mv}</b> mV ${mark(plateau.alcohol_settled)}<br>` +
-      `PID <b>${plateau.pid_value_mv}</b> mV ${mark(plateau.pid_settled)}`;
+      `PID <b class="ok">${plateau.pid_value_mv}</b> mV ${mark(plateau.pid_settled)}<br>` +
+      `<span class="cal-note">Alcohol during myrcene ${plateau.alcohol_value_mv} mV — cross-check only</span>`;
   }
 }
 
