@@ -145,6 +145,17 @@ CAMERA_STREAM_QUALITY = _int("HH_CAMERA_STREAM_QUALITY", 75)
 # handheld and makes the whole UI stutter.
 CAMERA_IDLE_STOP_SECONDS = _float("HH_CAMERA_IDLE_STOP_SECONDS", 8.0)
 
+# --- TEMPORARY: sensor calibration procedure --------------------------------
+CAL_CLEAN_SECONDS = _float("HH_CAL_CLEAN_SECONDS", 600.0)        # 10 min pump purge
+CAL_BASELINE_SECONDS = _float("HH_CAL_BASELINE_SECONDS", 60.0)   # 1 min baseline
+CAL_SPAN_SECONDS = _float("HH_CAL_SPAN_SECONDS", 10.0)           # t0..t10 window
+CAL_BASELINE_MAX_DEV_NA = _float("HH_CAL_BASELINE_MAX_DEV_NA", 100.0)  # AD5941
+CAL_BASELINE_MAX_DEV_MV = _float("HH_CAL_BASELINE_MAX_DEV_MV", 100.0)  # AD7798
+CAL_PLATEAU_MAX_SECONDS = _float("HH_CAL_PLATEAU_MAX_SECONDS", 120.0)
+CAL_PLATEAU_WINDOW_SECONDS = _float("HH_CAL_PLATEAU_WINDOW_SECONDS", 10.0)
+CAL_PLATEAU_TOLERANCE_NA = _float("HH_CAL_PLATEAU_TOLERANCE_NA", 50.0)
+CAL_PLATEAU_TOLERANCE_MV = _float("HH_CAL_PLATEAU_TOLERANCE_MV", 5.0)
+
 # --- Thermal receipt printer ------------------------------------------------
 # "serial" drives an ESC/POS printer over a serial port (python-escpos);
 # "mock" logs the receipt text (dev machines); "off" disables printing.

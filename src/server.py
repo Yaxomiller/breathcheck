@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src import analyzer as analyzer_module
-from src import camera, config, db, device, printer, scan
+from src import calibration, camera, config, db, device, printer, scan
 from src.gps import GpsProvider
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
@@ -493,6 +493,27 @@ def put_settings(update: SettingsIn) -> dict[str, Any]:
     if hardware_backlight is not None:
         result["hardware_backlight"] = hardware_backlight
     return result
+
+
+# --- TEMPORARY: calibration procedure ------------------------------------------------
+
+@app.get("/api/calibration")
+def calibration_status() -> dict[str, Any]:
+    return calibration.session.snapshot()
+
+
+@app.post("/api/calibration/{step}")
+def calibration_start(step: str) -> dict[str, Any]:
+    if step == "reset":
+        calibration.session.reset()
+        return calibration.session.snapshot()
+    if _analyzer.name != "spi":
+        # Mock analyzers can still run the flow (compressed timings) for UI work.
+        logger.info("calibration '%s' running against the %s analyzer", step, _analyzer.name)
+    ok, message = calibration.session.start(_analyzer, step)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    return calibration.session.snapshot()
 
 
 @app.post("/api/time")

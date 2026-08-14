@@ -160,6 +160,10 @@ class BreathAnalyzer:
     def stabilize(self) -> None:
         """App-start priming; no-op for the mock."""
 
+    def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
+                        store: bool = True, pump_on: bool = True) -> dict[int, list[tuple[int, float]]]:
+        raise NotImplementedError
+
     def shutdown(self) -> None:
         """Release hardware safely on exit; no-op for the mock."""
 
@@ -227,6 +231,32 @@ class MockAnalyzer(BreathAnalyzer):
                         samples=_mock_bell(measure_ms, cannabis_baseline, cannabis_peak),
                     ),
                 )
+            finally:
+                self.state = "ready"
+
+
+    def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
+                        store: bool = True, pump_on: bool = True) -> dict[int, list[tuple[int, float]]]:
+        """Simulated calibration sampling: a settled baseline with light noise,
+        so the procedure can be exercised without the sensor board."""
+        with self._lock:
+            self.state = "measuring"
+            try:
+                out = {SRC_AD7798: [], SRC_AD5941: []}
+                step_ms, started = 100, time.monotonic()
+                drift = random.uniform(-0.02, 0.02)
+                for t_ms in range(0, int(seconds * 1000) + 1, step_ms):
+                    if store:
+                        out[SRC_AD5941].append((t_ms, 900 + drift * t_ms / 100 + random.uniform(-12, 12)))
+                        out[SRC_AD7798].append((t_ms, 640 + random.uniform(-1.5, 1.5)))
+                    if progress:
+                        progress(min(t_ms / 1000.0, seconds), seconds)
+                    # Run at 20x so a 10-minute clean is testable in 30s.
+                    target = started + (t_ms / 1000.0) / 20.0
+                    now = time.monotonic()
+                    if target > now:
+                        time.sleep(min(0.05, target - now))
+                return out
             finally:
                 self.state = "ready"
 
@@ -549,6 +579,66 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 self.state = "finishing"
                 # Shut down the PID lamp, but deliberately leave AFE sampling
                 # on so its doorbell frames can carry the next PID START.
+                try:
+                    self._send_commands([CMD_PID_SHUTDOWN])
+                except Exception:
+                    pass
+                self.state = "ready"
+
+    def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
+                        store: bool = True, pump_on: bool = True) -> dict[int, list[tuple[int, float]]]:
+        """Run the sensors for `seconds` and return the raw samples per source
+        as {source: [(ms_from_start, raw_value), ...]}.
+
+        Used by the calibration procedure, which needs arbitrary-length runs
+        (a 10-minute clean, a 1-minute baseline) rather than the fixed
+        purge/baseline/measure cycle. Doorbells are serviced throughout, so
+        `store=False` still keeps the frame stream alive during long purges.
+        """
+        with self._lock:
+            self.state = "measuring"
+            total_ms = max(1.0, seconds) * 1000.0
+            out: dict[int, list[tuple[int, float]]] = {SRC_AD7798: [], SRC_AD5941: []}
+            t0: Optional[int] = None
+            wall_deadline = time.monotonic() + seconds + 60.0
+            try:
+                if pump_on:
+                    self.pump.write(True)
+                startup = [CMD_PID_STARTUP, CMD_AFE_STARTUP]
+                if not self._send_commands(startup, max_tries=3):
+                    logger.warning("calibration startup undelivered — hardware reset")
+                    self._reset_board()
+                    if pump_on:
+                        self.pump.write(True)
+                    if not self._send_commands(startup):
+                        raise RuntimeError("sensor board produced no frames after hardware reset")
+
+                while True:
+                    if time.monotonic() > wall_deadline:
+                        raise RuntimeError("sensor board stopped responding")
+                    records, _ = self._wait_frame()
+                    if records is None:
+                        continue
+                    for tick, source, value in records:
+                        if source not in out:
+                            continue
+                        if t0 is None:
+                            t0 = tick
+                        if tick < t0:
+                            continue
+                        dt = tick - t0
+                        if dt >= total_ms:
+                            return out
+                        if store:
+                            out[source].append((int(dt), float(value)))
+                        if progress:
+                            progress(dt / 1000.0, seconds)
+            finally:
+                try:
+                    self.pump.write(False)
+                except Exception:
+                    logger.exception("could not stop the pump after calibration sampling")
+                self.state = "finishing"
                 try:
                     self._send_commands([CMD_PID_SHUTDOWN])
                 except Exception:

@@ -256,9 +256,60 @@
         </div>
       </div>
 
+      <!-- TEMPORARY: calibration entry point -->
+      <div class="set-group">
+        <div class="set-title">CALIBRATION</div>
+        <div class="set-row">
+          <button id="btn-calibration" class="btn-small">OPEN CALIBRATION</button>
+        </div>
+      </div>
+
     </div>
   </section>
 </main>
+
+  <!-- ============ CALIBRATION (temporary) ============ -->
+  <section id="screen-calibration" class="screen">
+    <div class="cal-scroll">
+      <div class="cal-status" id="cal-message">Ready.</div>
+
+      <div class="cal-progress hidden" id="cal-progress">
+        <div class="cal-bar"><div class="cal-bar-fill" id="cal-bar-fill"></div></div>
+        <div class="cal-timer"><b id="cal-remaining">--:--</b><span id="cal-step-name">—</span></div>
+      </div>
+
+      <div class="cal-step">
+        <div class="cal-step-head"><span class="cal-num">1</span>CLEAN &middot; <em id="cal-clean-mins">10 min</em></div>
+        <div class="cal-step-body">Pump purges both sensors.</div>
+        <button id="cal-btn-clean" class="btn-primary cal-btn">START CLEAN</button>
+      </div>
+
+      <div class="cal-step" id="cal-step-baseline">
+        <div class="cal-step-head"><span class="cal-num">2</span>BASELINE &middot; <em id="cal-base-secs">60 s</em></div>
+        <div class="cal-step-body">Records the zero in clean air, then checks drift.</div>
+        <button id="cal-btn-baseline" class="btn-primary cal-btn" disabled>RECORD BASELINE</button>
+        <div class="cal-result hidden" id="cal-baseline-result"></div>
+      </div>
+
+      <div class="cal-step" id="cal-step-span">
+        <div class="cal-step-head"><span class="cal-num">3</span>SPAN &middot; INTEGRAL</div>
+        <div class="cal-step-body">Purge ethanol for 3&ndash;5 s when prompted; a 10 s window is integrated.</div>
+        <button id="cal-btn-span" class="btn-primary cal-btn" disabled>START SPAN</button>
+        <div class="cal-result hidden" id="cal-span-result"></div>
+      </div>
+
+      <div class="cal-step" id="cal-step-plateau">
+        <div class="cal-step-head"><span class="cal-num">4</span>PLATEAU &middot; LEVEL</div>
+        <div class="cal-step-body">Introduce the target gas; the settled value is recorded.</div>
+        <button id="cal-btn-plateau" class="btn-primary cal-btn" disabled>START PLATEAU</button>
+        <div class="cal-result hidden" id="cal-plateau-result"></div>
+      </div>
+
+      <div class="row-buttons cal-actions">
+        <button id="cal-btn-reset" class="btn-secondary">RESET</button>
+      </div>
+    </div>
+  </section>
 
 <!-- record detail overlay -->
 <div id="modal" class="modal hidden">

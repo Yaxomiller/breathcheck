@@ -67,6 +67,7 @@ function toast(message, isError = false) {
 const SCREEN_TITLES = {
   home: "BREATHCHECK", scan: "SCAN", form: "DETAILS", saved: "SAVED",
   database: "DATABASE", gps: "GPS", settings: "SETTINGS",
+  calibration: "CALIBRATION",
 };
 
 function showScreen(name) {
@@ -77,6 +78,8 @@ function showScreen(name) {
   state.screen = name;
 
   clearInterval(state.timers.gps);
+  clearInterval(state.timers.cal);
+  state.timers.cal = null;
   if (name !== "scan" && name !== "form") stopCamera();
 
   if (name === "home") refreshStatus();
@@ -87,6 +90,11 @@ function showScreen(name) {
     state.timers.gps = setInterval(refreshGps, 3000);
   }
   if (name === "settings") loadSettingsScreen();
+  if (name === "calibration") {
+    refreshCalibration();
+    // Steps run for minutes; poll steadily so the timer stays live.
+    state.timers.cal = setInterval(refreshCalibration, 1000);
+  }
 }
 
 function goHome() {
@@ -643,6 +651,98 @@ async function refreshGps() {
   } catch (err) { /* keep last values */ }
 }
 
+/* ============================== calibration (temporary) ==============================
+   Technician flow: 10-min clean -> 1-min baseline (drift-checked) -> span
+   (integral) / plateau (settled level). Each step runs on the backend; this
+   polls its progress and unlocks the next button. */
+
+const CAL_STEP_NAMES = { clean: "CLEANING", baseline: "BASELINE", span: "SPAN", plateau: "PLATEAU" };
+
+function fmtClock(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+async function refreshCalibration() {
+  if (state.screen !== "calibration") return;
+  try {
+    renderCalibration(await api("/api/calibration"));
+  } catch (err) { /* keep the last view on a transient failure */ }
+}
+
+function renderCalibration(cal) {
+  const running = cal.status === "running";
+
+  const message = $("#cal-message");
+  message.textContent = cal.message || "";
+  message.classList.toggle("err", cal.status === "error");
+  message.classList.toggle("ok", cal.status === "done" && !cal.error);
+
+  $("#cal-clean-mins").textContent = `${Math.round((cal.clean_seconds || 600) / 60)} min`;
+  $("#cal-base-secs").textContent = `${Math.round(cal.baseline_seconds || 60)} s`;
+
+  $("#cal-progress").classList.toggle("hidden", !running);
+  if (running) {
+    const total = cal.total || 1;
+    $("#cal-bar-fill").style.width = `${Math.min(100, (cal.elapsed / total) * 100)}%`;
+    $("#cal-remaining").textContent = fmtClock(total - cal.elapsed);
+    $("#cal-step-name").textContent = CAL_STEP_NAMES[cal.step] || "";
+  }
+
+  $("#cal-btn-clean").disabled = !cal.can_clean;
+  $("#cal-btn-baseline").disabled = !cal.can_baseline;
+  $("#cal-btn-span").disabled = !cal.can_span;
+  $("#cal-btn-plateau").disabled = !cal.can_span;
+
+  const base = cal.baseline;
+  const baseBox = $("#cal-baseline-result");
+  baseBox.classList.toggle("hidden", !base);
+  if (base) {
+    const mark = (ok) => `<span class="${ok ? "ok" : "bad"}">${ok ? "OK" : "OUT"}</span>`;
+    baseBox.innerHTML =
+      `ALCOHOL drift ${base.alcohol_deviation_na} / ${base.alcohol_limit_na} nA ${mark(base.alcohol_ok)}<br>` +
+      `PID drift ${base.pid_deviation_mv} / ${base.pid_limit_mv} mV ${mark(base.pid_ok)}<br>` +
+      `ZERO alcohol ${base.alcohol_mean_na} nA &middot; PID ${base.pid_mean_mv} mV`;
+  }
+
+  const span = cal.span;
+  const spanBox = $("#cal-span-result");
+  spanBox.classList.toggle("hidden", !span);
+  if (span) {
+    spanBox.innerHTML =
+      `ALCOHOL integral <b>${span.alcohol_integral_mvs}</b> mV&middot;s (peak ${span.alcohol_peak_na} nA)<br>` +
+      `PID integral <b>${span.pid_integral_mvs}</b> mV&middot;s (peak ${span.pid_peak_mv} mV)`;
+  }
+
+  const plateau = cal.plateau;
+  const plateauBox = $("#cal-plateau-result");
+  plateauBox.classList.toggle("hidden", !plateau);
+  if (plateau) {
+    const mark = (ok) => `<span class="${ok ? "ok" : "bad"}">${ok ? "SETTLED" : "NOT SETTLED"}</span>`;
+    plateauBox.innerHTML =
+      `ALCOHOL <b>${plateau.alcohol_value_mv}</b> mV ${mark(plateau.alcohol_settled)}<br>` +
+      `PID <b>${plateau.pid_value_mv}</b> mV ${mark(plateau.pid_settled)}`;
+  }
+}
+
+async function startCalibration(step) {
+  try {
+    renderCalibration(await postJson(`/api/calibration/${step}`, {}));
+    beep(880, 80);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function bindCalibration() {
+  $("#btn-calibration").addEventListener("click", () => showScreen("calibration"));
+  $("#cal-btn-clean").addEventListener("click", () => startCalibration("clean"));
+  $("#cal-btn-baseline").addEventListener("click", () => startCalibration("baseline"));
+  $("#cal-btn-span").addEventListener("click", () => startCalibration("span"));
+  $("#cal-btn-plateau").addEventListener("click", () => startCalibration("plateau"));
+  $("#cal-btn-reset").addEventListener("click", () => startCalibration("reset"));
+}
+
 /* ============================== settings ============================== */
 
 function applyBrightness(percent) {
@@ -797,6 +897,7 @@ function bindEvents() {
   });
 
   bindSettings();
+  bindCalibration();
 }
 
 /* ============================== on-screen keyboard ==============================
