@@ -57,12 +57,16 @@ sudo systemctl restart breathcheck.service
 # 2. Our kiosk starts with the desktop session.
 echo "==> Kiosk autostart"
 mkdir -p "$AUTOSTART"
+chmod +x "$APP_DIR/radxa/kiosk.sh" "$APP_DIR/radxa/run.sh" 2>/dev/null || true
+# Exec runs the script through bash: a fresh clone can land without the
+# executable bit, and a .desktop entry pointing at a non-executable file
+# fails silently at login.
 cat > "$AUTOSTART/$OURS" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=BreathCheck Kiosk
 Comment=Police handheld breath analyzer
-Exec=$APP_DIR/radxa/kiosk.sh
+Exec=/bin/bash $APP_DIR/radxa/kiosk.sh
 Terminal=false
 X-GNOME-Autostart-enabled=true
 DESKTOP
@@ -112,7 +116,8 @@ echo "==> Starting the kiosk on the device screen"
 pkill chromium 2>/dev/null || true
 sleep 1
 if [[ -n ${DISPLAY:-} ]] || [[ -e /tmp/.X11-unix/X0 ]]; then
-  DISPLAY="${DISPLAY:-:0}" nohup "$APP_DIR/radxa/kiosk.sh" >/tmp/breathcheck-kiosk.log 2>&1 &
+  DISPLAY="${DISPLAY:-:0}" nohup /bin/bash "$APP_DIR/radxa/kiosk.sh" \
+    >/tmp/breathcheck-kiosk.log 2>&1 &
   echo "    launched (log: /tmp/breathcheck-kiosk.log)"
 else
   echo "    no X display detected — it will start at the next desktop login"
