@@ -177,6 +177,10 @@ CAL_PLATEAU_TOLERANCE_MV = _float("HH_CAL_PLATEAU_TOLERANCE_MV", 5.0)
 PRINTER_MODE = _str("HH_PRINTER_MODE", "mock").lower()
 PRINTER_DEVICE = _str("HH_PRINTER_DEVICE", "/dev/ttyUSB0")
 PRINTER_BAUD = _int("HH_PRINTER_BAUD", 9600)
+PRINTER_TIMEOUT = _float("HH_PRINTER_TIMEOUT", 2.0)
+# HH_PRINTER_DEBUG=1 logs every byte sent to the printer (hex + ASCII), which
+# is how you tell "nothing was sent" apart from "sent but nothing printed".
+PRINTER_DEBUG = _str("HH_PRINTER_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
 PRINTER_FEED_LINES = _int("HH_PRINTER_FEED_LINES", 5)   # blank lines after the receipt
 # Receipt header / device identity (printed on every receipt).
 PRINT_DEVICE_NAME = _str("HH_PRINT_DEVICE_NAME", APP_NAME.upper())

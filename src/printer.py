@@ -94,11 +94,22 @@ def _print_serial(record: dict, settings: dict) -> tuple[bool, str]:
     try:
         printer = Serial(
             devfile=config.PRINTER_DEVICE, baudrate=config.PRINTER_BAUD,
-            bytesize=8, parity="N", stopbits=1, timeout=1,
+            bytesize=8, parity="N", stopbits=1, timeout=config.PRINTER_TIMEOUT,
         )
     except Exception as exc:
         logger.warning("printer open failed: %s", exc)
         return False, f"Printer not found on {config.PRINTER_DEVICE}"
+
+    if config.PRINTER_DEBUG:
+        # Wrap the port so every byte we send is visible in the log.
+        original_write = printer.device.write
+
+        def logged_write(data, _write=original_write):
+            logger.info("TX (%d bytes): %s", len(data), data.hex(" "))
+            logger.info("TX ASCII: %r", data)
+            return _write(data)
+
+        printer.device.write = logged_write
 
     try:
         printer.hw("INIT")
@@ -118,12 +129,18 @@ def _print_serial(record: dict, settings: dict) -> tuple[bool, str]:
             printer.text(f"{label}{value}\n")
 
         printer.device.write(bytes([0x1B, 0x64, max(0, config.PRINTER_FEED_LINES)]))
+        # Flush before close: closing can drop anything still buffered, which
+        # looks like "the app said Printed but no paper came out".
         printer.device.flush()
         return True, "Printed"
     except Exception as exc:
         logger.warning("print failed: %s", exc)
         return False, f"Print failed: {exc}"
     finally:
+        try:
+            printer.device.flush()
+        except Exception:
+            pass
         try:
             printer.close()
         except Exception:
