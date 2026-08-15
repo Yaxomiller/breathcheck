@@ -46,6 +46,8 @@ _probe_result: Optional[tuple[str, str]] = None
 
 
 def _candidate_devices() -> list[str]:
+    if not config.CAMERA_ENABLED:
+        return []          # HH_CAMERA_ENABLED=0: never touch the camera at all
     if config.CAMERA_DEVICE:
         return [config.CAMERA_DEVICE]
     nodes = sorted(glob.glob("/dev/video*"))
@@ -184,6 +186,11 @@ class CameraStreamer:
                 self._idle_since = time.monotonic()
 
     def _start_reaper(self) -> None:
+        # HH_CAMERA_IDLE_STOP_SECONDS<=0 keeps the pipeline up for the life of
+        # the process. Repeatedly tearing the Allwinner ISP down and bringing
+        # it back can destabilise the SoC, so this is the escape hatch.
+        if config.CAMERA_IDLE_STOP_SECONDS <= 0:
+            return
         if self._reaper is not None and self._reaper.is_alive():
             return
 
