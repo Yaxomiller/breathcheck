@@ -12,6 +12,7 @@ printer or python-escpos returns (False, reason) rather than raising.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from src import config
@@ -74,10 +75,70 @@ def build_receipt_text(record: dict, settings: dict) -> str:
     return "\n".join(lines)
 
 
+# --- ESC/POS control codes (raw mode) ---------------------------------------
+ESC_INIT = b"\x1b@"
+ESC_ALIGN_CENTER = b"\x1b\x61\x01"
+ESC_ALIGN_LEFT = b"\x1b\x61\x00"
+ESC_BOLD_ON = b"\x1b\x45\x01"
+ESC_BOLD_OFF = b"\x1b\x45\x00"
+ESC_SIZE_DOUBLE = b"\x1d\x21\x11"
+ESC_SIZE_NORMAL = b"\x1d\x21\x00"
+
+
+def build_receipt_bytes(record: dict, settings: dict) -> bytes:
+    """The receipt as a raw ESC/POS byte stream."""
+    out = bytearray(ESC_INIT)
+
+    out += ESC_ALIGN_CENTER + ESC_SIZE_DOUBLE + ESC_BOLD_ON
+    out += config.PRINT_DEVICE_NAME.encode("ascii", "replace") + b"\n"
+    out += ESC_SIZE_NORMAL + ESC_BOLD_OFF
+    for line in (config.PRINT_STATION_NAME, config.PRINT_STATION_ADDRESS):
+        if line:
+            out += line.encode("ascii", "replace") + b"\n"
+    out += b"\n" + ESC_ALIGN_LEFT
+
+    for label, value in receipt_fields(record, settings):
+        if not label and not value:
+            out += b"\n"
+            continue
+        out += ESC_BOLD_ON + label.encode("ascii", "replace")
+        out += ESC_BOLD_OFF + str(value).encode("ascii", "replace") + b"\n"
+
+    out += bytes([0x1B, 0x64, max(0, config.PRINTER_FEED_LINES)])
+    return bytes(out)
+
+
+def _print_raw(record: dict, settings: dict) -> tuple[bool, str]:
+    """Write the receipt straight to the device, the way
+
+        printf '...' | sudo tee /dev/ttyUSB0
+
+    does. No pyserial, so the port's existing termios settings are left
+    exactly as they are -- opening through pyserial reconfigures the line,
+    which can stop a printer that works fine with a plain write.
+    """
+    payload = build_receipt_bytes(record, settings)
+    if config.PRINTER_DEBUG:
+        logger.info("TX (%d bytes): %s", len(payload), payload.hex(" "))
+        logger.info("TX ASCII: %r", payload)
+    try:
+        with open(config.PRINTER_DEVICE, "wb", buffering=0) as port:
+            port.write(payload)
+            port.flush()
+            os.fsync(port.fileno())
+    except PermissionError:
+        return False, f"No permission for {config.PRINTER_DEVICE} (run as root)"
+    except OSError as exc:
+        return False, f"Could not write to {config.PRINTER_DEVICE}: {exc}"
+    return True, "Printed"
+
+
 def print_record(record: dict, settings: dict) -> tuple[bool, str]:
     """Print a saved record. Returns (ok, message)."""
     if config.PRINTER_MODE == "off":
         return False, "Printing is disabled"
+    if config.PRINTER_MODE == "raw":
+        return _print_raw(record, settings)
     if config.PRINTER_MODE == "serial":
         return _print_serial(record, settings)
     logger.info("MOCK PRINT (HH_PRINTER_MODE=%s):\n%s",

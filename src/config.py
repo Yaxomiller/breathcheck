@@ -172,8 +172,11 @@ CAL_PLATEAU_TOLERANCE_NA = _float("HH_CAL_PLATEAU_TOLERANCE_NA", 50.0)
 CAL_PLATEAU_TOLERANCE_MV = _float("HH_CAL_PLATEAU_TOLERANCE_MV", 5.0)
 
 # --- Thermal receipt printer ------------------------------------------------
-# "serial" drives an ESC/POS printer over a serial port (python-escpos);
-# "mock" logs the receipt text (dev machines); "off" disables printing.
+# "raw"    writes ESC/POS bytes straight to the device, leaving the port's
+#          existing settings alone -- the same thing `... | tee /dev/ttyUSB0`
+#          does, which is what actually works on this printer.
+# "serial" goes through python-escpos (pyserial reconfigures the port).
+# "mock"   logs the receipt text (dev machines); "off" disables printing.
 PRINTER_MODE = _str("HH_PRINTER_MODE", "mock").lower()
 PRINTER_DEVICE = _str("HH_PRINTER_DEVICE", "/dev/ttyUSB0")
 PRINTER_BAUD = _int("HH_PRINTER_BAUD", 9600)

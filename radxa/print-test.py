@@ -54,6 +54,20 @@ def sample_record() -> dict:
     }
 
 
+def print_one_line_raw() -> tuple[bool, str]:
+    """Rawest possible path - identical to `printf ... | tee /dev/ttyUSB0`."""
+    payload = b"\x1b@" + b"BreathCheck printer test\n" + bytes([0x1B, 0x64, 5])
+    print(f"TX ({len(payload)} bytes): {payload.hex(' ')}")
+    try:
+        with open(config.PRINTER_DEVICE, "wb", buffering=0) as port:
+            port.write(payload)
+            port.flush()
+            os.fsync(port.fileno())
+    except OSError as exc:
+        return False, f"could not write to {config.PRINTER_DEVICE}: {exc}"
+    return True, "sent (raw)"
+
+
 def print_one_line() -> tuple[bool, str]:
     """Minimal path: open, INIT, one line, feed, flush, close."""
     try:
@@ -94,21 +108,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Printer test")
     parser.add_argument("--line", action="store_true",
                         help="send a single line instead of a full receipt")
+    parser.add_argument("--raw", action="store_true",
+                        help="write bytes straight to the device (like tee)")
     args = parser.parse_args()
+    if args.raw:
+        config.PRINTER_MODE = "raw"
 
     print(f"config : {ENV_FILE}")
     print(f"mode   : {config.PRINTER_MODE}")
     print(f"device : {config.PRINTER_DEVICE} @ {config.PRINTER_BAUD} baud, "
           f"timeout {config.PRINTER_TIMEOUT}s")
-    if config.PRINTER_MODE != "serial":
-        print("\n!! HH_PRINTER_MODE is not 'serial', so nothing will reach the printer.")
-        print(f"   Set HH_PRINTER_MODE=serial in {ENV_FILE}, or run with:")
-        print("     sudo HH_PRINTER_MODE=serial .venv/bin/python radxa/print-test.py")
+    if config.PRINTER_MODE not in ("serial", "raw"):
+        print(f"\n!! HH_PRINTER_MODE is '{config.PRINTER_MODE}', so nothing reaches the printer.")
+        print(f"   Set HH_PRINTER_MODE=raw in {ENV_FILE}, or run with:")
+        print("     sudo HH_PRINTER_MODE=raw .venv/bin/python radxa/print-test.py")
 
     config.PRINTER_DEBUG = True   # always show the bytes for a test print
     print()
-    ok, message = print_one_line() if args.line else \
-        printer.print_record(sample_record(), {})
+    if args.line:
+        ok, message = print_one_line_raw() if config.PRINTER_MODE == "raw" \
+            else print_one_line()
+    else:
+        ok, message = printer.print_record(sample_record(), {})
     print(f"\nresult: {message}")
     if ok:
         print("If no paper came out, the bytes above left the Pi but the printer")
