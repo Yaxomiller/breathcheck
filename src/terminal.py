@@ -155,19 +155,8 @@ class Terminal:
 
     def _print_result(self, result: dict) -> None:
         print(bold("  " + "-" * 40))
-        alcohol_disp = f"{result['alcohol_bac']:.2f} mV.s"
-        cannabis_disp = f"{result['cannabis_ppb']:.2f} mV.s"
-        print("  ALCOHOL   " + f"{alcohol_disp:>14}   " +
-              _flag("", result["alcohol_flag"] == "YES"))
-        print("  CANNABIS  " + f"{cannabis_disp:>14}   " +
-              _flag("", result["cannabis_flag"] == "YES"))
-        ratio_disp = f"{result.get('cannabis_ratio', 0.0):.3f}"
-        print("  U/L RATIO " + f"{ratio_disp:>14}   " +
-              f"(thr {result.get('cannabis_threshold', 0)} mV, "
-              f"{result.get('cannabis_points', 0)} pts)")
-        verdict = result["test_result"]
-        print("  VERDICT   " +
-              (green(verdict) if verdict == "PASS" else red(verdict)))
+        print("  BAC        " + f"{result.get('bac_percent', 0.0):>10.3f} %")
+        print("  CONFIDENCE " + f"{result.get('confidence', 0.0):>10.3f}")
         print(bold("  " + "-" * 40))
 
     def _save_prompt(self, result: dict, session: dict, settings: dict) -> None:
@@ -201,14 +190,14 @@ class Terminal:
             print(dim("  no records"))
             return
         print()
-        print(bold(f"  {'NAME':<20}{'DL NO':<18}{'ALC':<6}{'CAN':<6}{'DATE':<12}"))
-        print(dim("  " + "-" * 60))
+        print(bold(f"  {'NAME':<20}{'ID NO':<18}{'BAC %':<9}{'CONF':<8}{'DATE':<12}"))
+        print(dim("  " + "-" * 66))
         for row in rows[:50]:
-            alc = red("YES") if row["alcohol_flag"] == "YES" else green("NO ")
-            can = red("YES") if row["cannabis_flag"] == "YES" else green("NO ")
             name = (row["name"] or "--")[:19]
-            dl = (row["dl_number"] or "--")[:17]
-            print(f"  {name:<20}{dl:<18}{alc:<6}{can:<6}{row['test_date']:<12}")
+            ident = (row["dl_number"] or "--")[:17]
+            bac = f"{row['bac_percent'] or 0:.3f}"
+            conf = f"{row['confidence'] or 0:.3f}"
+            print(f"  {name:<20}{ident:<18}{bac:<9}{conf:<8}{row['test_date']:<12}")
         print(dim(f"  ({len(rows)} shown)"))
 
     # ---- gps -------------------------------------------------------------

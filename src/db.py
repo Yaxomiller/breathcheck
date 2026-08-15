@@ -56,6 +56,7 @@ RECORD_FIELDS = (
     "testing_mode", "test_result", "alcohol_bac", "cannabis_ppb",
     "alcohol_baseline", "alcohol_peak", "cannabis_baseline", "cannabis_peak",
     "cannabis_ratio", "cannabis_upper", "cannabis_lower", "curve_file",
+    "bac_percent", "confidence",
     "alcohol_flag", "cannabis_flag", "mobile_no", "address", "photo_file",
     "created_at",
 )
@@ -72,6 +73,9 @@ _MIGRATION_COLUMNS = {
     "cannabis_upper": "REAL DEFAULT 0",
     "cannabis_lower": "REAL DEFAULT 0",
     "curve_file": "TEXT DEFAULT ''",
+    # The two figures shown to the officer: %BAC and the 0-1 confidence score.
+    "bac_percent": "REAL DEFAULT 0",
+    "confidence": "REAL DEFAULT 0",
 }
 
 
@@ -184,7 +188,7 @@ def insert_record(data: dict[str, Any]) -> int:
 
 def list_records(query: str = "", limit: int = 500) -> list[dict[str, Any]]:
     sql = (
-        "SELECT id, receipt_id, name, dl_number, alcohol_flag, cannabis_flag, "
+        "SELECT id, receipt_id, name, dl_number, bac_percent, confidence, "
         "test_date, test_time FROM records"
     )
     params: list[Any] = []

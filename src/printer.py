@@ -29,12 +29,20 @@ def receipt_fields(record: dict, settings: dict) -> list[tuple[str, str]]:
     """The (label, value) lines for the receipt body, in print order."""
     serial_number = _v(config.PRINT_SERIAL_NUMBER) or _v(record.get("set_no")) \
         or _v(settings.get("set_no"))
-    alcohol_state = "FAIL" if record.get("alcohol_flag") == "YES" else "PASS"
-    cannabis_state = "FAIL" if record.get("cannabis_flag") == "YES" else "PASS"
-    try:
-        ratio = f"{float(record.get('cannabis_ratio') or 0):.3f}"
-    except (TypeError, ValueError):
-        ratio = "0.000"
+
+    def _num(key: str) -> float:
+        try:
+            return float(record.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # Derived on the way out, so a record saved before these figures existed
+    # still prints correctly.
+    bac = record.get("bac_percent")
+    bac = float(bac) if bac not in (None, "") else config.bac_percent(_num("alcohol_bac"))
+    confidence = record.get("confidence")
+    confidence = float(confidence) if confidence not in (None, "") \
+        else config.confidence_score(_num("cannabis_ratio"))
 
     return [
         ("Receipt: ", _v(record.get("receipt_id"), "NA")),
@@ -49,15 +57,12 @@ def receipt_fields(record: dict, settings: dict) -> list[tuple[str, str]]:
         ("GPS1: ", _v(record.get("gps1"), "NA")),
         ("GPS2: ", _v(record.get("gps2"), "NA")),
         ("Name: ", _v(record.get("name"))),
-        ("DL Number: ", _v(record.get("dl_number"))),
-        ("Vehicle Number: ", _v(record.get("vehicle_no"))),
+        ("ID Number: ", _v(record.get("dl_number"))),
         ("Test Location: ", _v(record.get("test_location"))),
         ("Testing Officer: ", _v(record.get("testing_officer"))),
         ("Test mode: ", _v(record.get("testing_mode"), "ACTIVE")),
-        ("Test result: ", _v(record.get("test_result"), "NA")),
-        ("Alcohol: ", f"{_v(record.get('alcohol_bac'), '0')} mV.s ({alcohol_state})"),
-        ("Cannabis: ", f"{_v(record.get('cannabis_ppb'), '0')} mV.s ({cannabis_state})"),
-        ("U/L Ratio: ", ratio),
+        ("BAC: ", f"{bac:.3f} %"),
+        ("Confidence Score: ", f"{confidence:.3f}"),
         ("Mobile Number: ", _v(record.get("mobile_no"))),
         ("Address: ", _v(record.get("address"))),
     ]

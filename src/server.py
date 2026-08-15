@@ -107,6 +107,8 @@ class RecordIn(BaseModel):
     cannabis_upper: float = 0.0
     cannabis_lower: float = 0.0
     curve_file: str = ""
+    bac_percent: float = 0.0
+    confidence: float = 0.0
     alcohol_flag: str = "NO"
     cannabis_flag: str = "NO"
     mobile_no: str = ""

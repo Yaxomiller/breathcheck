@@ -392,29 +392,16 @@ function trackCycle(session) {
   void pollCycle();
 }
 
+/* Two figures only: %BAC for alcohol, a 0-1 confidence score for cannabis.
+   No pass/fail judgement is shown anywhere. */
+const fmtBac = (r) => (Number(r.bac_percent) || 0).toFixed(3);
+const fmtConfidence = (r) => (Number(r.confidence) || 0).toFixed(3);
+
 function showResults(result) {
   showScanStage("scan-result");
-  const verdict = $("#verdict");
-  verdict.textContent = result.test_result;
-  verdict.className = `verdict ${result.test_result === "PASS" ? "good" : "bad"}`;
-
-  $("#unit-alcohol").textContent = "mV·s";
-  $("#unit-cannabis").textContent = "mV·s";
-  $("#val-alcohol").textContent = fmtVal(result.alcohol_bac);
-  $("#val-cannabis").textContent = fmtVal(result.cannabis_ppb);
-  /* raw sensor-native values for calibration */
-  $("#sub-alcohol").textContent =
-    `RAW BASE ${Math.round(result.alcohol_baseline_raw || 0)} nA · PEAK +${Math.round(result.alcohol_peak_raw || 0)} nA`;
-  $("#sub-cannabis").textContent =
-    `RAW BASE ${Math.round(result.cannabis_baseline_raw || 0)} · PEAK +${Math.round(result.cannabis_peak_raw || 0)} codes`;
-  /* upper/lower area split of the exhale curve at the threshold */
-  $("#val-ratio").textContent = (Number(result.cannabis_ratio) || 0).toFixed(3);
-  $("#val-ratio").title =
-    `upper ${result.cannabis_upper ?? 0} / lower ${result.cannabis_lower ?? 0} mV·s ` +
-    `at ${result.cannabis_threshold ?? 0} mV (${result.cannabis_points ?? 0} pts)`;
-  setResultCard("#card-alcohol", "#flag-alcohol", result.alcohol_flag);
-  setResultCard("#card-cannabis", "#flag-cannabis", result.cannabis_flag);
-  result.test_result === "PASS" ? sndPass() : sndFail();
+  $("#val-alcohol").textContent = fmtBac(result);
+  $("#val-cannabis").textContent = fmtConfidence(result);
+  sndPass();
   if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
 
@@ -429,12 +416,6 @@ function photoPreviewUrl() {
   return "";
 }
 
-function setResultCard(cardSel, flagSel, flag) {
-  const failed = flag === "YES";
-  $(cardSel).classList.toggle("fail", failed);
-  $(cardSel).classList.toggle("pass", !failed);
-  $(flagSel).textContent = failed ? "FAIL" : "PASS";
-}
 
 /* ============================== form ============================== */
 
@@ -450,10 +431,8 @@ function openForm() {
     ["TIME", result.test_time], ["CALIBR DATE", scan.calibr_date || "--"],
     ["GPS 1", state.gpsFix.gps1 || "--"], ["GPS 2", state.gpsFix.gps2 || "--"],
     ["MODE", scan.testing_mode],
-    ["RESULT", result.test_result, result.test_result === "PASS" ? "good" : "bad"],
-    ["ALCOHOL", `${fmtVal(result.alcohol_bac)} mV·s`, result.alcohol_flag === "YES" ? "bad" : "good"],
-    ["CANNABIS", `${fmtVal(result.cannabis_ppb)} mV·s`, result.cannabis_flag === "YES" ? "bad" : "good"],
-    ["U/L RATIO", (Number(result.cannabis_ratio) || 0).toFixed(3)],
+    ["BAC", `${fmtBac(result)} %`],
+    ["CONFIDENCE", fmtConfidence(result)],
   ];
   $("#auto-grid").innerHTML = autoItems.map(([label, value, cls]) =>
     `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${value}</b></div>`).join("");
@@ -510,6 +489,7 @@ async function saveRecord() {
       cannabis_ratio: result.cannabis_ratio || 0,
       cannabis_upper: result.cannabis_upper || 0, cannabis_lower: result.cannabis_lower || 0,
       curve_file: result.curve_file || "",
+      bac_percent: result.bac_percent || 0, confidence: result.confidence || 0,
       alcohol_flag: result.alcohol_flag, cannabis_flag: result.cannabis_flag,
       mobile_no: $("#f-mobile").value.trim(),
       address: $("#f-address").value.trim(),
@@ -554,14 +534,12 @@ function buildPrintReceipt(receiptId, name) {
     ["Date", result.test_date], ["Time", result.test_time],
     ["Calibr Date", scan.calibr_date],
     ["GPS", `${state.gpsFix.gps1 || "--"} / ${state.gpsFix.gps2 || "--"}`],
-    ["Name", name], ["DL No", $("#f-dl").value.trim() || "--"],
-    ["Vehicle", $("#f-vehicle").value.trim() || "--"],
+    ["Name", name], ["ID No", $("#f-dl").value.trim() || "--"],
     ["Location", $("#f-location").value.trim() || "--"],
     ["Officer", $("#f-officer").value.trim() || "--"],
     ["Mode", scan.testing_mode],
-    ["Alcohol", `${fmtVal(result.alcohol_bac)} mV.s [${result.alcohol_flag === "YES" ? "FAIL" : "PASS"}]`],
-    ["Cannabis", `${fmtVal(result.cannabis_ppb)} mV.s [${result.cannabis_flag === "YES" ? "FAIL" : "PASS"}]`],
-    ["U/L Ratio", (Number(result.cannabis_ratio) || 0).toFixed(3)],
+    ["BAC", `${fmtBac(result)} %`],
+    ["Confidence Score", fmtConfidence(result)],
   ];
   const printPhotoUrl = photoPreviewUrl();
   $("#print-receipt").innerHTML = `
@@ -569,8 +547,6 @@ function buildPrintReceipt(receiptId, name) {
     <div class="pr-line"></div>
     ${printPhotoUrl ? `<img src="${printPhotoUrl}" alt="">` : ""}
     ${rows.map(([k, v]) => `<div class="pr-row"><span>${k}</span><span>${v}</span></div>`).join("")}
-    <div class="pr-line"></div>
-    <div class="pr-big">${result.test_result}</div>
     <div class="pr-line"></div>`;
 }
 
@@ -585,8 +561,8 @@ async function loadRecords(query = "") {
       <tr data-id="${row.id}">
         <td>${escapeHtml(row.name) || "--"}</td>
         <td>${escapeHtml(row.dl_number) || "--"}</td>
-        <td><span class="badge ${row.alcohol_flag === "YES" ? "yes" : "no"}">${row.alcohol_flag}</span></td>
-        <td><span class="badge ${row.cannabis_flag === "YES" ? "yes" : "no"}">${row.cannabis_flag}</span></td>
+        <td>${fmtBac(row)}</td>
+        <td>${fmtConfidence(row)}</td>
       </tr>`).join("");
   } catch (err) {
     toast(err.message, true);
@@ -603,7 +579,7 @@ async function openRecordDetail(id) {
     const record = await api(`/api/records/${id}`);
     $("#modal-title").textContent = record.receipt_id;
     const fields = [
-      ["NAME", record.name], ["DL NO", record.dl_number],
+      ["NAME", record.name], ["ID NO", record.dl_number],
       ["VEHICLE", record.vehicle_no], ["MOBILE", record.mobile_no],
       ["DATE", record.test_date], ["TIME", record.test_time],
       ["AREA", record.area], ["SET NO", record.set_no],
@@ -611,12 +587,8 @@ async function openRecordDetail(id) {
       ["CALIBR DATE", record.calibr_date], ["MODE", record.testing_mode],
       ["GPS 1", record.gps1], ["GPS 2", record.gps2],
       ["LOCATION", record.test_location], ["OFFICER", record.testing_officer],
-      ["ALCOHOL", `${fmtVal(record.alcohol_bac)} mV·s`, record.alcohol_flag === "YES" ? "bad" : "good"],
-      ["CANNABIS", `${fmtVal(record.cannabis_ppb)} mV·s`, record.cannabis_flag === "YES" ? "bad" : "good"],
-      ["ALC PEAK", `${fmtVal(record.alcohol_peak || 0)} µA`],
-      ["CAN PEAK", `${fmtVal(record.cannabis_peak || 0)} mV`],
-      ["U/L RATIO", (Number(record.cannabis_ratio) || 0).toFixed(3)],
-      ["RESULT", record.test_result, record.test_result === "PASS" ? "good" : "bad"],
+      ["BAC", `${fmtBac(record)} %`],
+      ["CONFIDENCE", fmtConfidence(record)],
     ];
     $("#modal-body").innerHTML = `
       ${record.photo_url ? `<img class="modal-photo" src="${record.photo_url}" alt="">` : ""}

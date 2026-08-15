@@ -130,6 +130,9 @@ def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
         "cannabis_lower": areas["lower"],
         "cannabis_threshold": areas["threshold"],
         "cannabis_points": areas["points"],
+        # The two figures actually shown to the officer.
+        "confidence": round(config.confidence_score(areas["ratio"]), 3),
+        "bac_percent": round(config.bac_percent(alcohol_value), 3),
     })
     return result
 
@@ -161,6 +164,8 @@ def record_from_result(result: dict, session: dict, fields: dict,
         "cannabis_ratio": result.get("cannabis_ratio", 0.0),
         "cannabis_upper": result.get("cannabis_upper", 0.0),
         "cannabis_lower": result.get("cannabis_lower", 0.0),
+        "bac_percent": result.get("bac_percent", 0.0),
+        "confidence": result.get("confidence", 0.0),
         "alcohol_flag": result["alcohol_flag"],
         "cannabis_flag": result["cannabis_flag"],
         "photo_file": "",

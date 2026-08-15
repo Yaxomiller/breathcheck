@@ -99,20 +99,15 @@
 
     <!-- stage: results -->
     <div id="scan-result" class="scan-stage hidden">
-      <div id="verdict" class="verdict">PASS</div>
       <div class="result-cards">
         <div class="result-card" id="card-alcohol">
           <div class="rc-name">ALCOHOL</div>
-          <div class="rc-value"><span id="val-alcohol">0.0</span><small id="unit-alcohol">mV&middot;s</small></div>
-          <div class="rc-sub" id="sub-alcohol"></div>
-          <div class="rc-flag" id="flag-alcohol">PASS</div>
+          <div class="rc-value"><span id="val-alcohol">0.000</span><small id="unit-alcohol">%&nbsp;BAC</small></div>
         </div>
         <div class="result-card" id="card-cannabis">
           <div class="rc-name">CANNABIS</div>
-          <div class="rc-value"><span id="val-cannabis">0.0</span><small id="unit-cannabis">mV&middot;s</small></div>
-          <div class="rc-ratio"><span class="rc-ratio-label">U/L RATIO</span><b id="val-ratio">--</b></div>
-          <div class="rc-sub" id="sub-cannabis"></div>
-          <div class="rc-flag" id="flag-cannabis">PASS</div>
+          <div class="rc-value"><span id="val-cannabis">0.000</span></div>
+          <div class="rc-sub">CONFIDENCE SCORE</div>
         </div>
       </div>
       <div class="row-buttons">
@@ -142,7 +137,7 @@
 
       <div class="form-grid">
         <label class="field req"><span>NAME</span><input id="f-name" autocomplete="off"></label>
-        <label class="field"><span>DL NO</span><input id="f-dl" autocomplete="off"></label>
+        <label class="field"><span>ID NO</span><input id="f-dl" autocomplete="off"></label>
         <label class="field"><span>VEHICLE NO</span><input id="f-vehicle" autocomplete="off"></label>
         <label class="field"><span>MOBILE NO</span><input id="f-mobile" inputmode="tel" autocomplete="off"></label>
         <label class="field"><span>TEST LOCATION</span><input id="f-location" autocomplete="off"></label>
@@ -176,7 +171,7 @@
     </div>
     <div class="db-table-wrap">
       <table class="db-table">
-        <thead><tr><th>NAME</th><th>DL NO</th><th>ALCOHOL</th><th>CANNABIS</th></tr></thead>
+        <thead><tr><th>NAME</th><th>ID NO</th><th>BAC %</th><th>CONFIDENCE</th></tr></thead>
         <tbody id="db-body"></tbody>
       </table>
       <div id="db-empty" class="db-empty hidden">NO RECORDS</div>

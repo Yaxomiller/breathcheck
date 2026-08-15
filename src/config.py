@@ -99,6 +99,37 @@ RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 # The reported ratio is upper / lower.
 CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
+# --- Reported figures -------------------------------------------------------
+# Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
+# ratio divided by its calibration threshold, capped at 1.
+CANNABIS_UL_THRESHOLD = _float("HH_CANNABIS_UL_THRESHOLD", 500.0)
+
+# Alcohol is reported as %BAC from a straight line through two calibration
+# points: the reading that means sober, and a reading of known concentration.
+BAC_ZERO_READING = _float("HH_BAC_ZERO_READING", 30.0)      # -> 0.00 %BAC
+BAC_REF_READING = _float("HH_BAC_REF_READING", 1500.0)      # -> BAC_REF_PERCENT
+BAC_REF_PERCENT = _float("HH_BAC_REF_PERCENT", 0.2)
+
+
+def confidence_score(ul_ratio: float) -> float:
+    """Cannabis upper/lower ratio -> confidence between 0 and 1."""
+    if CANNABIS_UL_THRESHOLD <= 0:
+        return 0.0
+    return max(0.0, min(1.0, float(ul_ratio) / CANNABIS_UL_THRESHOLD))
+
+
+def bac_percent(reading: float) -> float:
+    """Alcohol reading -> %BAC, linear through the two calibration points.
+
+    Anything at or below the sober reading reports 0.00, so a negative
+    reading (a baseline recorded above the response) never shows as negative
+    blood alcohol.
+    """
+    span = BAC_REF_READING - BAC_ZERO_READING
+    if span <= 0:
+        return 0.0
+    return max(0.0, (float(reading) - BAC_ZERO_READING) * BAC_REF_PERCENT / span)
+
 # Alcohol-cell stabilization at app start (fresh-air settle).
 # Disabled by default: the settle wait blocked scanning for up to
 # STABILIZE_MAX_S, which is too long in the field. With it off the AFE is
