@@ -76,6 +76,13 @@ BOARD_ENABLE_GPIO = _int("HH_BOARD_ENABLE_GPIO", 256)   # BRD_ON, PI0 pin 26
 READY_GPIO = _int("HH_READY_GPIO", 257)                 # doorbell, PI1 pin 32
 PUMP_GPIO = _int("HH_PUMP_GPIO", 271)                   # air pump, PI15, ACTIVE HIGH
 DOORBELL_TIMEOUT_SECONDS = _float("HH_DOORBELL_TIMEOUT_SECONDS", 5.0)
+# How often the doorbell-deassert loop re-reads the GPIO. Runs on every frame
+# forever via the keepalive, so a tight value means constant ioctl pressure on
+# the kernel; raise it further if the device is unstable.
+DEASSERT_POLL_SECONDS = _float("HH_DEASSERT_POLL_SECONDS", 0.005)
+# Gap between idle keepalive passes. Larger = less continuous SPI/GPIO
+# activity, at the cost of answering idle doorbells slightly later.
+KEEPALIVE_IDLE_SECONDS = _float("HH_KEEPALIVE_IDLE_SECONDS", 0.02)
 BOARD_RESET_SECONDS = _float("HH_BOARD_RESET_SECONDS", 0.1)
 BOARD_BOOT_SECONDS = _float("HH_BOARD_BOOT_SECONDS", 1.0)
 # Idle keepalive: after this long without a valid frame the board is reset

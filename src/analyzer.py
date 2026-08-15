@@ -343,6 +343,9 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         # the exchange — the command was already latched. The bound exists
         # only so a wedged board cannot hang the thread forever.
         deadline = time.monotonic() + config.DOORBELL_TIMEOUT_SECONDS
+        # 5ms rather than 1ms: this runs on every frame, forever, via the
+        # keepalive, and each read() is a GPIO ioctl. Still far inside the
+        # 100ms protocol window, at a fifth of the kernel churn.
         while not self.ready.read():
             if time.monotonic() >= deadline:
                 if error is None:
@@ -350,7 +353,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                                    config.DOORBELL_TIMEOUT_SECONDS)
                     break
                 return None, False
-            time.sleep(0.001)
+            time.sleep(config.DEASSERT_POLL_SECONDS)
         if error:
             return None, False
         return records, True
@@ -389,7 +392,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         thread covers the idle gaps so the frame stream never desyncs, and
         revives the board on its own if the stream goes quiet."""
         while True:
-            time.sleep(0.02)
+            time.sleep(config.KEEPALIVE_IDLE_SECONDS)
             if not self._lock.acquire(timeout=1.0):
                 continue   # a cycle owns the bus and is servicing doorbells
             try:
