@@ -399,32 +399,26 @@ def photo(filename: str) -> FileResponse:
 @app.get("/api/camera/stream")
 async def camera_stream() -> StreamingResponse:
     # Probing/first start opens the ISP (~1-2s); do it off the event loop.
-    # acquire() also registers this viewer, so the pipeline is shut down once
-    # the last preview goes away instead of encoding frames forever.
-    started = await run_in_threadpool(camera.streamer.acquire)
+    started = await run_in_threadpool(camera.streamer.ensure_started)
     if not started:
         raise HTTPException(status_code=503, detail="Camera unavailable")
 
     async def frames():
         idle = 0
         last = None
-        try:
-            while True:
-                frame = camera.streamer.latest_jpeg()
-                if frame is not None and frame is not last:
-                    last = frame
-                    yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
-                           b"Cache-Control: no-store, no-cache, must-revalidate\r\n\r\n"
-                           + frame + b"\r\n")
-                    idle = 0
-                else:
-                    idle += 1
-                    if idle > 250:   # ~15s with no new frame — let the <img> retry
-                        break
-                await asyncio.sleep(1.0 / max(1, config.CAMERA_STREAM_FPS))
-        finally:
-            # Runs on client disconnect too, so navigating away releases it.
-            camera.streamer.release()
+        while True:
+            frame = camera.streamer.latest_jpeg()
+            if frame is not None and frame is not last:
+                last = frame
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
+                       b"Cache-Control: no-store, no-cache, must-revalidate\r\n\r\n"
+                       + frame + b"\r\n")
+                idle = 0
+            else:
+                idle += 1
+                if idle > 250:   # ~15s with no new frame — let the <img> retry
+                    break
+            await asyncio.sleep(1.0 / max(1, config.CAMERA_STREAM_FPS))
 
     return StreamingResponse(
         frames(),

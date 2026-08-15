@@ -134,10 +134,11 @@ MOCK_SPEEDUP = _float("HH_MOCK_SPEEDUP", 1.0)
 # Leave HH_CAMERA_DEVICE blank to auto-probe /dev/video* (video0 first) and
 # cache whichever node yields a real JPEG; set it (e.g. /dev/video0) to skip
 # probing.
-# HH_CAMERA_ENABLED=0 disables the camera completely (no preview, no exhale
-# photo). The Allwinner ISP is the heaviest kernel path this app touches, so
-# this is the first thing to turn off if the device becomes unstable.
-CAMERA_ENABLED = _str("HH_CAMERA_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
+# DEFAULT OFF: the Allwinner ISP is the heaviest kernel path this app touches
+# and the device crashes at SoC level with it in use. No preview, no exhale
+# photo; everything else (scan, results, database, printing) is unaffected.
+# Set HH_CAMERA_ENABLED=1 to turn it back on once the crash is understood.
+CAMERA_ENABLED = _str("HH_CAMERA_ENABLED", "0").lower() not in {"0", "false", "no", "off"}
 CAMERA_DEVICE = _str("HH_CAMERA_DEVICE", "")
 CAMERA_WIDTH = _int("HH_CAMERA_WIDTH", 1280)
 CAMERA_HEIGHT = _int("HH_CAMERA_HEIGHT", 720)
