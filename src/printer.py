@@ -122,10 +122,11 @@ def _print_raw(record: dict, settings: dict) -> tuple[bool, str]:
         logger.info("TX (%d bytes): %s", len(payload), payload.hex(" "))
         logger.info("TX ASCII: %r", payload)
     try:
+        # buffering=0 means the write goes straight to the device. Do NOT
+        # fsync: on a character device that fails with EINVAL, which would
+        # report a perfectly good print as an error.
         with open(config.PRINTER_DEVICE, "wb", buffering=0) as port:
             port.write(payload)
-            port.flush()
-            os.fsync(port.fileno())
     except PermissionError:
         return False, f"No permission for {config.PRINTER_DEVICE} (run as root)"
     except OSError as exc:

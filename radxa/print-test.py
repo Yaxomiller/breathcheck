@@ -60,9 +60,7 @@ def print_one_line_raw() -> tuple[bool, str]:
     print(f"TX ({len(payload)} bytes): {payload.hex(' ')}")
     try:
         with open(config.PRINTER_DEVICE, "wb", buffering=0) as port:
-            port.write(payload)
-            port.flush()
-            os.fsync(port.fileno())
+            port.write(payload)   # unbuffered; fsync would fail with EINVAL
     except OSError as exc:
         return False, f"could not write to {config.PRINTER_DEVICE}: {exc}"
     return True, "sent (raw)"
