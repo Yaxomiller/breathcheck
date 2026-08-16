@@ -29,6 +29,12 @@ html, body {
 
 body { display: flex; flex-direction: column; }
 
+/* Screen mounted upside down: rotate the whole UI. Taps still land correctly
+   because the browser hit-tests through the transform, and fixed-position
+   elements (keyboard, toast, modal) rotate with it since the transform makes
+   body their containing block. */
+body.inverted { transform: rotate(180deg); }
+
 .hidden { display: none !important; }
 
 /* software brightness dim */

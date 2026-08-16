@@ -1052,6 +1052,13 @@ function blockZoom() {
 }
 
 async function boot() {
+  // Before anything is drawn, so an upside-down screen never flashes the
+  // right way up first.
+  try {
+    const status = await api("/api/status");
+    document.body.classList.toggle("inverted", status.screen_invert !== false);
+  } catch (err) { /* leave unrotated if the backend is not up yet */ }
+
   blockZoom();
   initKeyboard();
   bindEvents();

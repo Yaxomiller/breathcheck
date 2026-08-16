@@ -51,6 +51,12 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 WEB_HOST = _str("HH_WEB_HOST", "0.0.0.0")
 WEB_PORT = _int("HH_WEB_PORT", 8000)
 
+# Rotate the whole UI 180 degrees, for a screen mounted upside down. Done in
+# CSS rather than xrandr so touch keeps working: the browser maps taps through
+# the transform, whereas rotating the display needs the touch matrix rotated
+# separately. HH_SCREEN_INVERT=0 turns it off.
+SCREEN_INVERT = _str("HH_SCREEN_INVERT", "1").lower() not in {"0", "false", "no", "off"}
+
 # --- Breath analyzer -------------------------------------------------------
 # "mock" on a PC, "spi" on the device with the sensor board attached.
 ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()

@@ -165,6 +165,7 @@ def status() -> dict[str, Any]:
         "set_no": settings.get("set_no", ""),
         "sensor_state": _analyzer.state,
         "stream_ok": bool(getattr(_analyzer, "stream_ok", True)),
+        "screen_invert": config.SCREEN_INVERT,
         "printer_mode": config.PRINTER_MODE,
         "stabilize": stabilize,
         "purge_seconds": config.PURGE_SECONDS,
