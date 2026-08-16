@@ -34,6 +34,8 @@ OURS=breathcheck-kiosk.desktop
 if [[ ${1:-} == "--undo" ]]; then
   echo "==> Restoring the previous default UI"
   rm -f "$AUTOSTART/$OURS"
+  sudo rm -f /etc/systemd/system/breathcheck.service.d/boot-delay.conf
+  sudo systemctl daemon-reload 2>/dev/null || true
   if [[ -d $DISABLED ]]; then
     for entry in "$DISABLED"/*.desktop; do
       [[ -e $entry ]] || continue
@@ -49,8 +51,21 @@ fi
 echo "==> Making BreathCheck the default UI"
 echo "    user $KIOSK_USER, port $PORT"
 
-# 1. Backend starts on boot and is running now.
+# 1. Backend starts on boot and is running now, after a settling delay.
 echo "==> Backend service"
+BOOT_DELAY="${HH_STARTUP_DELAY_SECONDS:-60}"
+sudo mkdir -p /etc/systemd/system/breathcheck.service.d
+# Drop-in rather than rewriting the unit, so the installer stays the owner of
+# it. The delay only applies at boot: a manual `systemctl start` waits too,
+# but that is rare compared to the value of letting the board settle first.
+sudo tee /etc/systemd/system/breathcheck.service.d/boot-delay.conf >/dev/null <<UNIT
+[Service]
+ExecStartPre=/bin/bash -c 'if [ -f /run/breathcheck-booted ]; then exit 0; fi; \\
+  sleep ${BOOT_DELAY}; touch /run/breathcheck-booted'
+UNIT
+echo "    boot delay: ${BOOT_DELAY}s before the backend starts"
+sudo systemctl daemon-reload
+sudo touch /run/breathcheck-booted     # this run is manual: do not wait now
 sudo systemctl enable breathcheck.service
 sudo systemctl restart breathcheck.service
 
@@ -66,7 +81,7 @@ cat > "$AUTOSTART/$OURS" <<DESKTOP
 Type=Application
 Name=BreathCheck Kiosk
 Comment=Police handheld breath analyzer
-Exec=/bin/bash $APP_DIR/radxa/kiosk.sh
+Exec=/bin/bash $APP_DIR/radxa/kiosk.sh --boot-delay
 Terminal=false
 X-GNOME-Autostart-enabled=true
 DESKTOP

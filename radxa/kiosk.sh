@@ -2,6 +2,10 @@
 # Opens the BreathCheck UI fullscreen on the device screen.
 # Started automatically at desktop login (installed by install.sh),
 # or run manually from a terminal on the device.
+#
+#   --boot-delay   wait HH_KIOSK_DELAY_SECONDS first (used by the autostart
+#                  entry, so the board settles after boot before the UI loads).
+#                  Manual runs start immediately.
 set -u
 
 ENV_FILE=/etc/breathcheck.env
@@ -9,6 +13,12 @@ if [[ -f $ENV_FILE ]]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 URL="http://127.0.0.1:${HH_WEB_PORT:-8000}/"
+
+if [[ ${1:-} == "--boot-delay" ]]; then
+  delay="${HH_KIOSK_DELAY_SECONDS:-60}"
+  echo "boot delay: waiting ${delay}s before starting the kiosk"
+  sleep "$delay"
+fi
 
 # Keep the screen awake and hide the mouse cursor (touchscreen).
 if command -v xset >/dev/null 2>&1; then
