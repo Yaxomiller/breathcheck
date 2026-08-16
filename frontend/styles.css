@@ -376,59 +376,6 @@ main { flex: 1; position: relative; overflow: hidden; }
 .gps-row b { font-size: clamp(26px, 6vw, 36px); font-weight: 800; font-variant-numeric: tabular-nums; }
 .gps-meta { display: flex; gap: 26px; color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: 1.5px; }
 
-/* ---------- settings ---------- */
-.settings-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px; }
-.set-group {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-.set-title { font-size: 12px; font-weight: 800; letter-spacing: 3px; color: var(--accent); margin-bottom: 6px; }
-.set-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(38, 52, 80, .45);
-  min-height: 52px;
-}
-.set-row:last-child { border-bottom: none; }
-.set-row > span { flex: 0 0 118px; font-size: 12.5px; font-weight: 800; letter-spacing: 1.5px; color: var(--muted); }
-.set-row > b { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.set-row > em { font-size: 12px; color: var(--muted); font-style: normal; font-weight: 700; }
-.set-row input[type="number"], .set-row input[type="text"],
-.set-row input[type="date"], .set-row input[type="datetime-local"] {
-  flex: 1; min-width: 0; max-width: 230px;
-  padding: 12px;
-  font-size: 16px; font-weight: 600;
-  color: var(--text); background: var(--panel2);
-  border: 1px solid var(--line); border-radius: 10px;
-  outline: none;
-  color-scheme: dark;
-}
-.set-row input:focus { border-color: var(--accent); }
-.set-row input[type="range"] { flex: 1; accent-color: var(--accent); height: 34px; }
-
-.toggle {
-  min-width: 96px; padding: 12px 18px;
-  font-size: 14px; font-weight: 800; letter-spacing: 2px;
-  border-radius: 10px; cursor: pointer;
-  background: var(--panel2); color: var(--muted);
-  border: 1px solid var(--line);
-  transition: all .15s;
-}
-.toggle.on { background: rgba(56, 189, 248, .16); color: var(--accent); border-color: var(--accent); }
-
-.btn-small {
-  padding: 13px 22px;
-  font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
-  border-radius: 10px; cursor: pointer;
-  background: var(--panel2); color: var(--text);
-  border: 1px solid var(--line);
-  transition: transform .12s;
-}
-.btn-small:active { transform: scale(.95); }
-.btn-small.danger { color: var(--bad); border-color: rgba(239, 68, 68, .4); }
-
 /* ---------- modal ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 100;
@@ -468,58 +415,6 @@ main { flex: 1; position: relative; overflow: hidden; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
 .detail-grid .auto-item b { font-size: 15px; }
 .detail-wide { grid-column: 1 / -1; }
-
-/* ---------- calibration (temporary) ---------- */
-.cal-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
-.cal-mode {
-  border-radius: var(--radius); padding: 12px 16px;
-  font-size: 13px; font-weight: 800; letter-spacing: 1px; line-height: 1.45;
-}
-.cal-mode.live { background: rgba(34, 197, 94, .12); border: 1px solid rgba(34, 197, 94, .5); color: var(--good); }
-.cal-mode.sim  { background: rgba(239, 68, 68, .14); border: 1px solid var(--bad); color: var(--bad); }
-.cal-mode small { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0; margin-top: 4px; opacity: .9; }
-
-.cal-status {
-  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 14px 16px; font-size: 14.5px; font-weight: 700; line-height: 1.4;
-}
-.cal-status.err { border-color: var(--bad); color: var(--bad); }
-.cal-status.ok { border-color: rgba(34, 197, 94, .5); color: var(--good); }
-
-.cal-progress {
-  background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius);
-  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
-}
-.cal-bar { height: 12px; border-radius: 999px; background: var(--panel2); overflow: hidden; }
-.cal-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #67d5ff, var(--accent)); transition: width .3s; }
-.cal-timer { display: flex; align-items: baseline; justify-content: space-between; }
-.cal-timer b { font-size: 26px; font-variant-numeric: tabular-nums; }
-.cal-timer span { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: var(--muted); }
-
-.cal-step {
-  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
-}
-.cal-step-head { font-size: 13px; font-weight: 800; letter-spacing: 2px; display: flex; align-items: center; gap: 10px; }
-.cal-step-head em { font-style: normal; color: var(--muted); letter-spacing: 1px; }
-.cal-num {
-  width: 24px; height: 24px; border-radius: 50%; flex: none;
-  background: var(--accent); color: #032033;
-  display: flex; align-items: center; justify-content: center; font-size: 13px;
-}
-.cal-step-body { font-size: 13px; color: var(--muted); font-weight: 600; line-height: 1.4; }
-/* flex:none — .btn-primary's 260px flex-basis would otherwise apply to the
-   vertical axis inside this column-flex card and make the button 260px tall */
-.cal-btn { width: 100%; padding: 15px; flex: none; }
-.cal-btn:disabled { opacity: .4; }
-.cal-result {
-  background: var(--panel2); border-radius: 12px; padding: 10px 12px;
-  font-size: 13px; font-weight: 700; line-height: 1.6; font-variant-numeric: tabular-nums;
-}
-.cal-result .ok { color: var(--good); }
-.cal-result .bad { color: var(--bad); }
-.cal-result .cal-note { color: var(--muted); font-size: 11.5px; font-weight: 600; }
-.cal-actions { padding-top: 4px; }
 
 /* ---------- on-screen keyboard ---------- */
 .keyboard {
@@ -581,3 +476,6 @@ body.kb-open .screen { bottom: var(--kb-h); }
   #print-receipt img { width: 110px; display: block; margin: 6px auto; }
   #print-receipt .pr-big { text-align: center; font-size: 15px; font-weight: bold; margin: 4px 0; }
 }
+
+.db-actions { padding: 12px 0 4px; }
+.btn-secondary.danger { color: var(--bad); border-color: rgba(239, 68, 68, .45); }

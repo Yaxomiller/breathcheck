@@ -66,8 +66,7 @@ function toast(message, isError = false) {
 
 const SCREEN_TITLES = {
   home: "BREATHCHECK", scan: "SCAN", form: "DETAILS", saved: "SAVED",
-  database: "DATABASE", gps: "GPS", settings: "SETTINGS",
-  calibration: "CALIBRATION",
+  database: "DATABASE", gps: "GPS",
 };
 
 function showScreen(name) {
@@ -78,8 +77,6 @@ function showScreen(name) {
   state.screen = name;
 
   clearInterval(state.timers.gps);
-  clearInterval(state.timers.cal);
-  state.timers.cal = null;
   if (name !== "scan" && name !== "form") stopCamera();
 
   if (name === "home") refreshStatus();
@@ -88,12 +85,6 @@ function showScreen(name) {
   if (name === "gps") {
     refreshGps();
     state.timers.gps = setInterval(refreshGps, 3000);
-  }
-  if (name === "settings") loadSettingsScreen();
-  if (name === "calibration") {
-    refreshCalibration();
-    // Steps run for minutes; poll steadily so the timer stays live.
-    state.timers.cal = setInterval(refreshCalibration, 1000);
   }
 }
 
@@ -113,12 +104,6 @@ function tickClock() {
   $("#home-date").textContent = now.toLocaleDateString([], {
     timeZone: IST_TZ, weekday: "long", day: "2-digit", month: "short", year: "numeric",
   });
-  if (state.screen === "settings") {
-    $("#set-now").textContent = now.toLocaleString([], {
-      timeZone: IST_TZ, day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-    });
-  }
 }
 
 /* ============================== home status ============================== */
@@ -623,234 +608,24 @@ async function refreshGps() {
   } catch (err) { /* keep last values */ }
 }
 
-/* ============================== calibration (temporary) ==============================
-   Technician flow: 10-min clean -> 1-min baseline (drift-checked) -> span
-   (integral) / plateau (settled level). Each step runs on the backend; this
-   polls its progress and unlocks the next button. */
-
-const CAL_STEP_NAMES = {
-  clean: "CLEANING", baseline: "BASELINE",
-  span: "ETHANOL · ALCOHOL", plateau: "MYRCENE · PID",
-};
-
-function fmtClock(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
-async function refreshCalibration() {
-  if (state.screen !== "calibration") return;
-  try {
-    renderCalibration(await api("/api/calibration"));
-  } catch (err) { /* keep the last view on a transient failure */ }
-}
-
-function renderCalibration(cal) {
-  const running = cal.status === "running";
-
-  /* Never let simulated numbers pass as a real calibration. */
-  const mode = $("#cal-mode");
-  if (cal.sensor_live) {
-    mode.className = "cal-mode live";
-    mode.innerHTML = "REAL SENSOR (SPI) — readings come from the board";
-  } else {
-    mode.className = "cal-mode sim";
-    mode.innerHTML = `SIMULATED DATA — SENSOR NOT CONNECTED (${cal.analyzer || "mock"})` +
-      `<small>${(cal.sensor_warnings && cal.sensor_warnings[0]) ||
-        "The board could not be opened, so any calibration here is meaningless."}</small>`;
-  }
-
-  const message = $("#cal-message");
-  message.textContent = cal.message || "";
-  message.classList.toggle("err", cal.status === "error");
-  message.classList.toggle("ok", cal.status === "done" && !cal.error);
-
-  $("#cal-clean-mins").textContent = `${Math.round((cal.clean_seconds || 600) / 60)} min`;
-  $("#cal-base-secs").textContent = `${Math.round(cal.baseline_seconds || 60)} s`;
-
-  $("#cal-progress").classList.toggle("hidden", !running);
-  if (running) {
-    const total = cal.total || 1;
-    $("#cal-bar-fill").style.width = `${Math.min(100, (cal.elapsed / total) * 100)}%`;
-    $("#cal-remaining").textContent = fmtClock(total - cal.elapsed);
-    $("#cal-step-name").textContent = CAL_STEP_NAMES[cal.step] || "";
-  }
-
-  $("#cal-btn-clean").disabled = !cal.can_clean;
-  $("#cal-btn-baseline").disabled = !cal.can_baseline;
-  $("#cal-btn-span").disabled = !cal.can_span;
-  $("#cal-btn-plateau").disabled = !cal.can_span;
-
-  const base = cal.baseline;
-  const baseBox = $("#cal-baseline-result");
-  baseBox.classList.toggle("hidden", !base);
-  if (base) {
-    const mark = (ok) => `<span class="${ok ? "ok" : "bad"}">${ok ? "OK" : "OUT"}</span>`;
-    baseBox.innerHTML =
-      `ALCOHOL drift ${base.alcohol_deviation_na} / ${base.alcohol_limit_na} nA ${mark(base.alcohol_ok)}<br>` +
-      `PID drift ${base.pid_deviation_mv} / ${base.pid_limit_mv} mV ${mark(base.pid_ok)}<br>` +
-      `ZERO alcohol ${base.alcohol_mean_na} nA &middot; PID ${base.pid_mean_mv} mV`;
-  }
-
-  const span = cal.span;
-  const spanBox = $("#cal-span-result");
-  spanBox.classList.toggle("hidden", !span);
-  if (span) {
-    spanBox.innerHTML =
-      `ALCOHOL CELL integral <b class="ok">${span.alcohol_integral_mvs}</b> mV&middot;s ` +
-      `(peak ${span.alcohol_peak_na} nA)<br>` +
-      `<span class="cal-note">PID during ethanol ${span.pid_integral_mvs} mV&middot;s — cross-check only</span>`;
-  }
-
-  const plateau = cal.plateau;
-  const plateauBox = $("#cal-plateau-result");
-  plateauBox.classList.toggle("hidden", !plateau);
-  if (plateau) {
-    const mark = (ok) => `<span class="${ok ? "ok" : "bad"}">${ok ? "SETTLED" : "NOT SETTLED"}</span>`;
-    plateauBox.innerHTML =
-      `PID <b class="ok">${plateau.pid_value_mv}</b> mV ${mark(plateau.pid_settled)}<br>` +
-      `<span class="cal-note">Alcohol during myrcene ${plateau.alcohol_value_mv} mV — cross-check only</span>`;
-  }
-}
-
-async function startCalibration(step) {
-  try {
-    renderCalibration(await postJson(`/api/calibration/${step}`, {}));
-    beep(880, 80);
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-function bindCalibration() {
-  $("#btn-calibration").addEventListener("click", () => showScreen("calibration"));
-  $("#cal-btn-clean").addEventListener("click", () => startCalibration("clean"));
-  $("#cal-btn-baseline").addEventListener("click", () => startCalibration("baseline"));
-  $("#cal-btn-span").addEventListener("click", () => startCalibration("span"));
-  $("#cal-btn-plateau").addEventListener("click", () => startCalibration("plateau"));
-  $("#cal-btn-reset").addEventListener("click", () => startCalibration("reset"));
-}
-
-/* ============================== settings ============================== */
-
+/* Screen dimming is applied from the saved brightness at boot; the
+   settings screen that used to change it has been removed. */
 function applyBrightness(percent) {
   $("#dim").style.opacity = String(((100 - percent) / 100) * 0.75);
 }
 
-async function loadSettingsScreen() {
+/* Wipe every stored test. Double-confirmed: this cannot be undone. */
+async function clearDatabase() {
+  if (!confirm("Delete ALL records? This cannot be undone.")) return;
+  if (!confirm("Are you sure? Every test record will be erased.")) return;
   try {
-    const settings = await api("/api/settings");
-    state.settings = settings;
-    $("#set-brightness").value = settings.brightness;
-    $("#set-brightness-val").textContent = `${settings.brightness}%`;
-    $("#set-sound").textContent = settings.sound ? "ON" : "OFF";
-    $("#set-sound").classList.toggle("on", settings.sound);
-    $("#set-alimit").value = settings.alcohol_limit;
-    $("#set-climit").value = settings.cannabis_limit;
-    $("#set-scansec").value = settings.scan_seconds;
-    $("#set-photosec").value = settings.photo_second;
-    $("#set-mode").textContent = settings.testing_mode;
-    $("#set-mode").classList.toggle("on", settings.testing_mode === "ACTIVE");
-    $("#set-officer").value = settings.officer;
-    $("#set-area").value = settings.area;
-    $("#set-setno").value = settings.set_no;
-    $("#set-calibr").value = settings.calibr_date;
-    $("#set-version").textContent = settings.version;
-    $("#set-counter").textContent = settings.counter;
-    $("#set-sensor").textContent = settings.analyzer.toUpperCase();
-    $("#set-gps").textContent = settings.gps_mode.toUpperCase();
-    applyBrightness(settings.brightness);
-    const status = await api("/api/status");
-    $("#set-records").textContent = status.records;
+    const result = await api("/api/records?confirm=ERASE", { method: "DELETE" });
+    toast(`CLEARED ${result.deleted}`);
+    loadRecords($("#db-search").value.trim());
   } catch (err) {
     toast(err.message, true);
   }
 }
-
-let saveTimer = null;
-let pendingPatch = {};
-function pushSettings(patch, quiet = false) {
-  Object.assign(pendingPatch, patch);
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    const payload = pendingPatch;
-    pendingPatch = {};
-    try {
-      state.settings = await postJson("/api/settings", payload, "PUT");
-      if (!quiet) toast("SAVED");
-    } catch (err) {
-      toast(err.message, true);
-    }
-  }, 350);
-}
-
-function bindSettings() {
-  $("#set-brightness").addEventListener("input", (event) => {
-    const value = Number(event.target.value);
-    $("#set-brightness-val").textContent = `${value}%`;
-    applyBrightness(value);
-    pushSettings({ brightness: value }, true);
-  });
-  $("#set-sound").addEventListener("click", () => {
-    const on = !$("#set-sound").classList.contains("on");
-    $("#set-sound").textContent = on ? "ON" : "OFF";
-    $("#set-sound").classList.toggle("on", on);
-    if (state.settings) state.settings.sound = on;
-    pushSettings({ sound: on });
-    if (on) beep(880, 80);
-  });
-  $("#set-mode").addEventListener("click", () => {
-    const next = $("#set-mode").textContent === "ACTIVE" ? "PASSIVE" : "ACTIVE";
-    $("#set-mode").textContent = next;
-    $("#set-mode").classList.toggle("on", next === "ACTIVE");
-    pushSettings({ testing_mode: next });
-  });
-
-  const numberFields = [
-    ["#set-alimit", "alcohol_limit"], ["#set-climit", "cannabis_limit"],
-    ["#set-scansec", "scan_seconds"], ["#set-photosec", "photo_second"],
-  ];
-  numberFields.forEach(([sel, key]) => {
-    $(sel).addEventListener("change", (event) => {
-      const value = Number(event.target.value);
-      if (Number.isFinite(value)) pushSettings({ [key]: value });
-    });
-  });
-  const textFields = [
-    ["#set-officer", "officer"], ["#set-area", "area"],
-    ["#set-setno", "set_no"], ["#set-calibr", "calibr_date"],
-  ];
-  textFields.forEach(([sel, key]) => {
-    $(sel).addEventListener("change", (event) => pushSettings({ [key]: event.target.value }));
-  });
-
-  $("#btn-set-time").addEventListener("click", async () => {
-    const value = $("#set-datetime").value;
-    if (!value) { toast("PICK DATE & TIME", true); return; }
-    try {
-      const result = await postJson("/api/time", { datetime: value.replace("T", " ") + ":00" });
-      toast(result.message, !result.ok);
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-
-  $("#btn-export").addEventListener("click", () => { window.location.href = "/api/export.csv"; });
-
-  $("#btn-erase").addEventListener("click", async () => {
-    if (!confirm("Erase ALL records? This cannot be undone.")) return;
-    if (!confirm("Are you sure? Every test record will be deleted.")) return;
-    try {
-      const result = await api("/api/records?confirm=ERASE", { method: "DELETE" });
-      toast(`ERASED ${result.deleted}`);
-      loadSettingsScreen();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
-/* ============================== boot ============================== */
 
 function bindEvents() {
   document.querySelectorAll("[data-nav]").forEach((el) =>
@@ -878,14 +653,12 @@ function bindEvents() {
     const row = event.target.closest("tr[data-id]");
     if (row) openRecordDetail(Number(row.dataset.id));
   });
+  $("#btn-db-clear").addEventListener("click", clearDatabase);
 
   $("#modal-close").addEventListener("click", () => $("#modal").classList.add("hidden"));
   $("#modal").addEventListener("click", (event) => {
     if (event.target === $("#modal")) $("#modal").classList.add("hidden");
   });
-
-  bindSettings();
-  bindCalibration();
 }
 
 /* ============================== on-screen keyboard ==============================
