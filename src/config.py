@@ -101,8 +101,9 @@ CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
 # --- Reported figures -------------------------------------------------------
 # Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
-# ratio divided by its calibration threshold, capped at 1.
+# ratio divided by its calibration threshold, scaled by a gain, capped at 1.
 CANNABIS_UL_THRESHOLD = _float("HH_CANNABIS_UL_THRESHOLD", 500.0)
+CANNABIS_CONFIDENCE_GAIN = _float("HH_CANNABIS_CONFIDENCE_GAIN", 3.0)
 
 # Alcohol is reported as %BAC from a straight line through two calibration
 # points: the reading that means sober, and a reading of known concentration.
@@ -112,10 +113,15 @@ BAC_REF_PERCENT = _float("HH_BAC_REF_PERCENT", 0.2)
 
 
 def confidence_score(ul_ratio: float) -> float:
-    """Cannabis upper/lower ratio -> confidence between 0 and 1."""
+    """Cannabis upper/lower ratio -> confidence between 0 and 1.
+
+    The ratio over its threshold is multiplied by CANNABIS_CONFIDENCE_GAIN
+    (3x) and then capped, so anything that would exceed 1 reports exactly 1.
+    """
     if CANNABIS_UL_THRESHOLD <= 0:
         return 0.0
-    return max(0.0, min(1.0, float(ul_ratio) / CANNABIS_UL_THRESHOLD))
+    scaled = float(ul_ratio) / CANNABIS_UL_THRESHOLD * CANNABIS_CONFIDENCE_GAIN
+    return max(0.0, min(1.0, scaled))
 
 
 def bac_percent(reading: float) -> float:
