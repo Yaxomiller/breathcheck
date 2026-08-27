@@ -27,6 +27,7 @@ def _v(value: Any, blank: str = "") -> str:
 
 def receipt_fields(record: dict, settings: dict) -> list[tuple[str, str]]:
     """The (label, value) lines for the receipt body, in print order."""
+    now = config.now_local()   # IST
     serial_number = _v(config.PRINT_SERIAL_NUMBER) or _v(record.get("set_no")) \
         or _v(settings.get("set_no"))
 
@@ -50,8 +51,10 @@ def receipt_fields(record: dict, settings: dict) -> list[tuple[str, str]]:
         ("Ser.-No: ", _v(serial_number, "NA")),
         ("", ""),
         ("Counter: ", _v(record.get("counter"), "0")),
-        ("Date: ", _v(record.get("test_date"), "NA")),
-        ("Time: ", _v(record.get("test_time"), "NA")),
+        # Always IST, and fall back to now rather than printing "NA" if a
+        # record somehow reached here without a stamp.
+        ("Date: ", _v(record.get("test_date"), now.strftime("%Y-%m-%d"))),
+        ("Time: ", _v(record.get("test_time"), now.strftime("%H:%M:%S"))),
         ("Calibr. Date: ", _v(record.get("calibr_date"), "NA")),
         ("", ""),
         ("GPS1: ", _v(record.get("gps1"), "NA")),
@@ -65,6 +68,12 @@ def receipt_fields(record: dict, settings: dict) -> list[tuple[str, str]]:
         ("Confidence Score: ", f"{confidence:.3f}"),
         ("Mobile Number: ", _v(record.get("mobile_no"))),
         ("Address: ", _v(record.get("address"))),
+        ("", ""),
+        # Left blank deliberately: signed by hand on the printed slip.
+        ("Officer Signature: ", ""),
+        ("", ""),
+        ("Candidate Signature: ", ""),
+        ("", ""),
     ]
 
 

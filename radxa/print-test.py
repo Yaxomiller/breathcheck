@@ -45,7 +45,7 @@ def sample_record() -> dict:
         "test_time": now.strftime("%H:%M:%S"),
         "calibr_date": "2026/05/16",
         "gps1": "NA", "gps2": "NA",
-        "name": "SAMPLE PRINT", "dl_number": "", "vehicle_no": "",
+        "name": "SAMPLE PRINT", "dl_number": "",
         "test_location": "st marks road", "testing_officer": "B 05",
         "testing_mode": "Passive", "test_result": "No Alcohol",
         "alcohol_bac": 0, "cannabis_ppb": 0,

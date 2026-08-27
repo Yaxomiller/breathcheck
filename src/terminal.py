@@ -166,8 +166,7 @@ class Terminal:
             return
         fields = {
             "name": name,
-            "dl_number": _prompt("  DL no"),
-            "vehicle_no": _prompt("  Vehicle no"),
+            "dl_number": _prompt("  ID no"),
             "mobile_no": _prompt("  Mobile no"),
             "test_location": _prompt("  Test location"),
             "testing_officer": _prompt("  Officer", settings.get("officer", "")),

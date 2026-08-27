@@ -27,7 +27,7 @@
       <div class="home-date" id="home-date">&nbsp;</div>
     </div>
     <div class="tiles">
-      <button class="tile tile-scan" data-nav="scan">
+      <button class="tile tile-scan" data-nav="form">
         <svg viewBox="0 0 48 48"><circle cx="19" cy="24" r="9" fill="none" stroke="currentColor" stroke-width="3"/><path d="M31 16c4 0 7 2 9 4M31 24h11M31 32c4 0 7-2 9-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
         <span>SCAN</span>
       </button>
@@ -108,7 +108,7 @@
       </div>
       <div class="row-buttons">
         <button id="btn-rescan" class="btn-secondary">RESCAN</button>
-        <button id="btn-to-form" class="btn-primary">NEXT &rarr;</button>
+        <button id="btn-save-result" class="btn-primary">SAVE</button>
       </div>
     </div>
 
@@ -123,13 +123,7 @@
   <!-- ============ FORM ============ -->
   <section id="screen-form" class="screen">
     <div class="form-scroll">
-      <div class="auto-panel">
-        <div class="auto-grid" id="auto-grid"></div>
-        <div class="auto-photo">
-          <img id="form-photo" alt="" class="hidden">
-          <div id="form-nophoto" class="nophoto">NO PHOTO</div>
-        </div>
-      </div>
+      <div class="form-hint">Fill in the subject's details, then start the test.</div>
 
       <div class="form-grid">
         <label class="field req"><span>NAME</span><input id="f-name" autocomplete="off"></label>
@@ -143,7 +137,7 @@
     </div>
     <div class="row-buttons form-actions">
       <button id="btn-form-cancel" class="btn-secondary">CANCEL</button>
-      <button id="btn-form-save" class="btn-primary">SAVE</button>
+      <button id="btn-form-start" class="btn-primary">START TEST &rarr;</button>
     </div>
   </section>
 
@@ -163,7 +157,7 @@
   <!-- ============ DATABASE ============ -->
   <section id="screen-database" class="screen">
     <div class="db-toolbar">
-      <input id="db-search" placeholder="SEARCH NAME / ID / VEHICLE" autocomplete="off">
+      <input id="db-search" placeholder="SEARCH NAME / ID" autocomplete="off">
     </div>
     <div class="db-table-wrap">
       <table class="db-table">

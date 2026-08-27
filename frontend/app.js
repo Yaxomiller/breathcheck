@@ -25,6 +25,7 @@ const state = {
   gpsFix: { gps1: "", gps2: "" },
   photoData: "",     // captured JPEG data-url
   stream: null,
+  details: null,     // subject details, taken before the exhalation
   timers: { countdown: null, gps: null, poll: null },
 };
 
@@ -81,6 +82,7 @@ function showScreen(name) {
 
   if (name === "home") refreshStatus();
   if (name === "scan") enterScanReady();
+  if (name === "form") openDetailsForm();
   if (name === "database") loadRecords($("#db-search").value.trim());
   if (name === "gps") {
     refreshGps();
@@ -402,46 +404,30 @@ function photoPreviewUrl() {
 }
 
 
-/* ============================== form ============================== */
+/* ============================== details form ==============================
+   The subject's details are taken BEFORE the exhalation, so the officer is
+   not holding a waiting subject while typing. The values are kept in
+   state.details and written to the record once the reading completes. */
 
-function openForm() {
-  const scan = state.scan;
-  const result = state.result;
-  if (!scan || !result) return;
+const DETAIL_FIELDS = {
+  name: "#f-name", dl_number: "#f-dl", vehicle_no: "#f-vehicle",
+  mobile_no: "#f-mobile", test_location: "#f-location",
+  testing_officer: "#f-officer", address: "#f-address",
+};
 
-  const autoItems = [
-    ["RECEIPT ID", scan.receipt_id], ["AREA", scan.area || "--"],
-    ["VERSION", scan.version], ["SET NO", scan.set_no || "--"],
-    ["COUNTER", String(scan.counter)], ["DATE", result.test_date],
-    ["TIME", result.test_time], ["CALIBR DATE", scan.calibr_date || "--"],
-    ["GPS 1", state.gpsFix.gps1 || "--"], ["GPS 2", state.gpsFix.gps2 || "--"],
-    ["MODE", scan.testing_mode],
-    ["BAC", `${fmtBac(result)} %`],
-    ["CONFIDENCE", fmtConfidence(result)],
-  ];
-  $("#auto-grid").innerHTML = autoItems.map(([label, value, cls]) =>
-    `<div class="auto-item"><span>${label}</span><b class="${cls || ""}">${value}</b></div>`).join("");
-
-  const photo = $("#form-photo");
-  const photoUrl = photoPreviewUrl();
-  if (photoUrl) {
-    photo.src = photoUrl;
-    photo.classList.remove("hidden");
-    $("#form-nophoto").classList.add("hidden");
-  } else {
-    photo.classList.add("hidden");
-    $("#form-nophoto").classList.remove("hidden");
-  }
-
-  ["#f-name", "#f-dl", "#f-vehicle", "#f-mobile", "#f-location", "#f-address"].forEach((sel) => {
+function openDetailsForm() {
+  Object.values(DETAIL_FIELDS).forEach((sel) => {
     $(sel).value = "";
     $(sel).classList.remove("invalid");
   });
-  $("#f-officer").value = scan.officer || "";
-  showScreen("form");
+  // Carry the officer over between tests; they rarely change mid-shift.
+  $("#f-officer").value = state.details?.testing_officer
+    || state.settings?.officer || "";
+  state.details = null;
 }
 
-async function saveRecord() {
+/* Collect the details, then move on to the exhalation. */
+function startTestFromForm() {
   const name = $("#f-name").value.trim();
   if (!name) {
     $("#f-name").classList.add("invalid");
@@ -449,9 +435,22 @@ async function saveRecord() {
     toast("NAME REQUIRED", true);
     return;
   }
+  const details = {};
+  for (const [key, sel] of Object.entries(DETAIL_FIELDS)) {
+    details[key] = $(sel).value.trim();
+  }
+  state.details = details;
+  showScreen("scan");
+}
+
+async function saveRecord() {
   const scan = state.scan;
   const result = state.result;
-  const button = $("#btn-form-save");
+  if (!scan || !result) { toast("NO READING TO SAVE", true); return; }
+  // Collected on the details screen before the exhalation.
+  const details = state.details || {};
+  const name = details.name || "";
+  const button = $("#btn-save-result");
   button.disabled = true;
   try {
     const saved = await postJson("/api/records", {
@@ -462,10 +461,10 @@ async function saveRecord() {
       calibr_date: scan.calibr_date,
       gps1: state.gpsFix.gps1, gps2: state.gpsFix.gps2,
       name,
-      dl_number: $("#f-dl").value.trim(),
-      vehicle_no: $("#f-vehicle").value.trim(),
-      test_location: $("#f-location").value.trim(),
-      testing_officer: $("#f-officer").value.trim(),
+      dl_number: details.dl_number || "",
+      vehicle_no: details.vehicle_no || "",
+      test_location: details.test_location || "",
+      testing_officer: details.testing_officer || "",
       testing_mode: scan.testing_mode,
       test_result: result.test_result,
       alcohol_bac: result.alcohol_bac, cannabis_ppb: result.cannabis_ppb,
@@ -476,8 +475,8 @@ async function saveRecord() {
       curve_file: result.curve_file || "",
       bac_percent: result.bac_percent || 0, confidence: result.confidence || 0,
       alcohol_flag: result.alcohol_flag, cannabis_flag: result.cannabis_flag,
-      mobile_no: $("#f-mobile").value.trim(),
-      address: $("#f-address").value.trim(),
+      mobile_no: details.mobile_no || "",
+      address: details.address || "",
       photo_b64: state.photoData,
     });
     buildPrintReceipt(saved.receipt_id, name);
@@ -513,18 +512,22 @@ async function printReceipt(recordId, button) {
 function buildPrintReceipt(receiptId, name) {
   const scan = state.scan;
   const result = state.result;
+  const details = state.details || {};
   const rows = [
     ["Receipt", receiptId], ["Area", scan.area], ["Version", scan.version],
     ["Set No", scan.set_no], ["Counter", scan.counter],
     ["Date", result.test_date], ["Time", result.test_time],
     ["Calibr Date", scan.calibr_date],
     ["GPS", `${state.gpsFix.gps1 || "--"} / ${state.gpsFix.gps2 || "--"}`],
-    ["Name", name], ["ID No", $("#f-dl").value.trim() || "--"],
-    ["Location", $("#f-location").value.trim() || "--"],
-    ["Officer", $("#f-officer").value.trim() || "--"],
+    ["Name", name], ["ID No", details.dl_number || "--"],
+    ["Location", details.test_location || "--"],
+    ["Officer", details.testing_officer || "--"],
     ["Mode", scan.testing_mode],
     ["BAC", `${fmtBac(result)} %`],
     ["Confidence Score", fmtConfidence(result)],
+    ["", ""],
+    ["Officer Signature", "____________"],
+    ["Candidate Signature", "____________"],
   ];
   const printPhotoUrl = photoPreviewUrl();
   $("#print-receipt").innerHTML = `
@@ -565,7 +568,7 @@ async function openRecordDetail(id) {
     $("#modal-title").textContent = record.receipt_id;
     const fields = [
       ["NAME", record.name], ["ID NO", record.dl_number],
-      ["VEHICLE", record.vehicle_no], ["MOBILE", record.mobile_no],
+      ["MOBILE", record.mobile_no],
       ["DATE", record.test_date], ["TIME", record.test_time],
       ["AREA", record.area], ["SET NO", record.set_no],
       ["COUNTER", record.counter], ["VERSION", record.version],
@@ -635,10 +638,10 @@ function bindEvents() {
   $("#btn-start-scan").addEventListener("click", beginScan);
   $("#btn-rescan").addEventListener("click", enterScanReady);
   $("#btn-retry").addEventListener("click", enterScanReady);
-  $("#btn-to-form").addEventListener("click", openForm);
 
   $("#btn-form-cancel").addEventListener("click", goHome);
-  $("#btn-form-save").addEventListener("click", saveRecord);
+  $("#btn-form-start").addEventListener("click", startTestFromForm);
+  $("#btn-save-result").addEventListener("click", saveRecord);
   $("#f-name").addEventListener("input", () => $("#f-name").classList.remove("invalid"));
 
   $("#btn-done").addEventListener("click", goHome);

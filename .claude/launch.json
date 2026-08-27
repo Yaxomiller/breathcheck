@@ -4,8 +4,19 @@
     {
       "name": "breathcheck",
       "runtimeExecutable": "C:\\Users\\Aninda Mukhopadhyay\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\\python.exe",
-      "runtimeArgs": ["app.py", "serve"],
+      "runtimeArgs": [
+        "app.py",
+        "serve"
+      ],
       "port": 8000
+    },
+    {
+      "name": "attendance-demo",
+      "runtimeExecutable": "C:\\Users\\Aninda Mukhopadhyay\\Documents\\New project\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\Users\\ANINDA~1\\AppData\\Local\\Temp\\claude\\C--Users-Aninda-Mukhopadhyay-Documents-Handheld\\3ccec4b0-4282-4ae0-84c4-8a0bf6c9d160\\scratchpad\\run_demo.py"
+      ],
+      "port": 8802
     }
   ]
 }
