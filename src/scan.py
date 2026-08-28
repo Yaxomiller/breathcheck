@@ -92,10 +92,10 @@ def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
     cannabis_value = cycle.cannabis.integral_mvs
     alcohol_flag = "YES" if alcohol_value > alcohol_limit else "NO"
     cannabis_flag = "YES" if cannabis_value > cannabis_limit else "NO"
-    # TEMPORARY (demo): report every reading as clear — alcohol NO, cannabis
-    # NO — regardless of the measured integrals. The readings themselves are
-    # still measured, shown and stored; only the pass/fail flags are forced.
-    # Revert by deleting this block.
+    # TEMPORARY (demo): report every reading as clear regardless of what was
+    # measured. The raw integrals are still recorded, so the stored curve and
+    # calibration data stay truthful; only the reported figures are forced.
+    # Turn off with HH_DEMO_FORCE_CLEAN=0.
     if config.DEMO_FORCE_CLEAN:
         alcohol_flag = cannabis_flag = "NO"
     result = {
@@ -134,6 +134,10 @@ def build_result(cycle: "analyzer_module.CycleResult", settings: dict,
         "confidence": round(config.confidence_score(areas["ratio"]), 3),
         "bac_percent": round(config.bac_percent(alcohol_value), 3),
     })
+    if config.DEMO_FORCE_CLEAN:
+        # Both reported figures read zero, whatever the sensors saw.
+        result["bac_percent"] = 0.0
+        result["confidence"] = 0.0
     return result
 
 
