@@ -105,6 +105,13 @@ RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 # The reported ratio is upper / lower.
 CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
+# Project the baseline's own drift across the measure window and subtract it,
+# instead of holding the baseline flat at its mean. A sensor that is still
+# settling ramps by far more than the detection threshold during a 10s blow,
+# so without this the reading is mostly drift and looks random.
+# HH_DRIFT_CORRECTION=0 restores the flat baseline.
+DRIFT_CORRECTION = _str("HH_DRIFT_CORRECTION", "1").lower() not in {"0", "false", "no", "off"}
+
 # --- Reported figures -------------------------------------------------------
 # Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
 # ratio divided by its calibration threshold, scaled by a gain, capped at 1.

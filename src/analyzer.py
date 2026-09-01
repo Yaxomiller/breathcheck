@@ -112,6 +112,25 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
+def _fit_line(points: list[tuple[int, float]]) -> tuple[float, float]:
+    """Least-squares (intercept, slope-per-ms) through the baseline samples.
+
+    Used to project the sensor's own drift across the measure window so it is
+    not mistaken for a response. Falls back to a flat line at the mean when
+    there is too little data to fit.
+    """
+    n = len(points)
+    if n < 2:
+        return (points[0][1] if n else 0.0), 0.0
+    mean_t = sum(t for t, _v in points) / n
+    mean_v = sum(v for _t, v in points) / n
+    denominator = sum((t - mean_t) ** 2 for t, _v in points)
+    if denominator <= 0:
+        return mean_v, 0.0
+    slope = sum((t - mean_t) * (v - mean_v) for t, v in points) / denominator
+    return mean_v - slope * mean_t, slope
+
+
 def _finite(value: float) -> float:
     return float(value) if value == value and abs(value) != float("inf") else 0.0
 
@@ -162,6 +181,10 @@ class BreathAnalyzer:
 
     def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
                         store: bool = True, pump_on: bool = True) -> dict[int, list[tuple[int, float]]]:
+        raise NotImplementedError
+
+    def stream_samples(self, callback: Callable[[int, int, float], None],
+                       should_stop: Callable[[], bool], pump_on: bool = True) -> None:
         raise NotImplementedError
 
     def shutdown(self) -> None:
@@ -261,6 +284,23 @@ class MockAnalyzer(BreathAnalyzer):
                     if target > now:
                         time.sleep(min(0.1, target - now))
                 return out
+            finally:
+                self.state = "ready"
+
+
+    def stream_samples(self, callback: Callable[[int, int, float], None],
+                       should_stop: Callable[[], bool], pump_on: bool = True) -> None:
+        """Simulated live stream, so the logger can be exercised off-hardware."""
+        with self._lock:
+            self.state = "measuring"
+            try:
+                tick, drift = 0, random.uniform(-0.02, 0.02)
+                while not should_stop():
+                    tick += 60
+                    callback(tick, SRC_AD7798, 640 + random.uniform(-1.5, 1.5))
+                    if tick % 240 == 0:
+                        callback(tick, SRC_AD5941, 900 + drift * tick + random.uniform(-12, 12))
+                    time.sleep(0.06)
             finally:
                 self.state = "ready"
 
@@ -509,7 +549,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
 
             stats = {s: {"base": [], "baseline": None, "integ": 0.0,
                          "peak": 0.0, "peak_t": 0, "prev": None, "stable": True,
-                         "samples": []}
+                         "samples": [], "fit": (0.0, 0.0)}
                      for s in (SRC_AD7798, SRC_AD5941)}
             t0: Optional[int] = None   # STM32 tick of first AD5941 sample
             try:
@@ -555,16 +595,26 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         elif dt < purge_ms + baseline_ms:
                             phase = "baseline"
                             elapsed, total = (dt - purge_ms) / 1000.0, baseline_ms / 1000.0
-                            channel["base"].append(value)
+                            channel["base"].append((tick, value))
                         else:
                             phase = "measure"
                             elapsed, total = (dt - purge_ms - baseline_ms) / 1000.0, measure_ms / 1000.0
                             if channel["baseline"] is None and channel["base"]:
-                                channel["baseline"] = sum(channel["base"]) / float(len(channel["base"]))
-                                spread = max(channel["base"]) - min(channel["base"])
+                                values = [v for _t, v in channel["base"]]
+                                channel["baseline"] = sum(values) / float(len(values))
+                                spread = max(values) - min(values)
                                 channel["stable"] = spread <= BASELINE_SPREAD_WARN[source]
+                                channel["fit"] = _fit_line(channel["base"])
                             if channel["baseline"] is not None:
-                                delta = value - channel["baseline"]
+                                # Subtract the baseline's own drift, projected
+                                # forward. A sensor still settling ramps by far
+                                # more than the detection threshold over a 10s
+                                # blow, so a fixed baseline reports that ramp as
+                                # signal and the reading looks random.
+                                intercept, slope = channel["fit"]
+                                expected = (intercept + slope * tick
+                                            if config.DRIFT_CORRECTION else channel["baseline"])
+                                delta = value - expected
                                 if channel["prev"] is not None:
                                     prev_t, prev_d = channel["prev"]
                                     channel["integ"] += (delta + prev_d) / 2.0 * (tick - prev_t)
@@ -660,6 +710,48 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     self.pump.write(False)
                 except Exception:
                     logger.exception("could not stop the pump after calibration sampling")
+                self.state = "finishing"
+                try:
+                    self._send_commands([CMD_PID_SHUTDOWN])
+                except Exception:
+                    pass
+                self.state = "ready"
+
+    def stream_samples(self, callback: Callable[[int, int, float], None],
+                       should_stop: Callable[[], bool], pump_on: bool = True) -> None:
+        """Deliver every raw sample to `callback(tick_ms, source, value)` until
+        `should_stop()` returns True.
+
+        Unlike collect_samples this hands each reading over as it arrives, for
+        live monitoring where the operator watches the numbers and marks events
+        (gas in, gas out) against them.
+        """
+        with self._lock:
+            self.state = "measuring"
+            try:
+                if pump_on:
+                    self.pump.write(True)
+                startup = [CMD_PID_STARTUP, CMD_AFE_STARTUP]
+                if not self._send_commands(startup, max_tries=3):
+                    logger.warning("stream startup undelivered — hardware reset")
+                    self._reset_board()
+                    if pump_on:
+                        self.pump.write(True)
+                    if not self._send_commands(startup):
+                        raise RuntimeError("sensor board produced no frames after hardware reset")
+
+                while not should_stop():
+                    records, _ = self._wait_frame()
+                    if records is None:
+                        continue
+                    for tick, source, value in records:
+                        if source in (SRC_AD7798, SRC_AD5941):
+                            callback(int(tick), int(source), float(value))
+            finally:
+                try:
+                    self.pump.write(False)
+                except Exception:
+                    logger.exception("could not stop the pump after streaming")
                 self.state = "finishing"
                 try:
                     self._send_commands([CMD_PID_SHUTDOWN])
