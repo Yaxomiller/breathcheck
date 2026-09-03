@@ -45,6 +45,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(_str("HH_DATA_DIR", str(BASE_DIR / "data")))
 PHOTO_DIR = DATA_DIR / "photos"
 CURVE_DIR = DATA_DIR / "curves"      # per-scan exhale ADC traces (CSV)
+# One growing CSV holding every ADC reading from both sensors for every breath
+# ever taken -- the single file to copy off the device for later analysis.
+BREATH_LOG_FILE = Path(_str("HH_BREATH_LOG_FILE", str(DATA_DIR / "breaths.csv")))
 DB_PATH = DATA_DIR / "breathcheck.db"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
@@ -70,8 +73,13 @@ DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "1").lower() in {"1", "true", "ye
 
 # Measurement cycle (seconds). The blow window itself is the officer-visible
 # "scan time" setting; purge/baseline are hardware timings.
-PURGE_SECONDS = _float("HH_PURGE_SECONDS", 15.0)      # pump on, sensors warming
-BASELINE_SECONDS = _float("HH_BASELINE_SECONDS", 5.0)  # fresh-air zero
+# Cycle shape: 5s stabilise (1s pump settle + 4s fresh-air zero), 10s blow,
+# then 5s more recording while the sensors fall back. That tail matters: without
+# it the trace is cut off at peak, so it never forms a bell and the upper/lower
+# area split is measured against a truncated lower area, inflating the ratio.
+PURGE_SECONDS = _float("HH_PURGE_SECONDS", 1.0)        # pump on, discard
+BASELINE_SECONDS = _float("HH_BASELINE_SECONDS", 4.0)  # fresh-air zero
+RECOVERY_SECONDS = _float("HH_RECOVERY_SECONDS", 5.0)  # falling edge after the blow
 
 # STM32 SPI bridge wiring.
 SPI_DEVICE = _str("HH_SPI_DEVICE", "/dev/spidev1.0")

@@ -252,6 +252,11 @@ const PHASE_UI = {
     hint: "SENSOR RESTARTING — PLEASE WAIT",
     timed: false,
   },
+  recovery: {
+    label: "STOP",
+    hint: "STOP BLOWING — READING THE FALL-OFF",
+    timed: true,
+  },
   purge: {
     label: "STABILIZE",
     hint: "SENSOR STABILIZING — DO NOT BLOW YET",

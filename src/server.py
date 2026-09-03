@@ -208,7 +208,7 @@ def _run_scan(session_id: str, measure_seconds: float, receipt_id: str, photo_se
         settings = db.get_settings()
         result = scan.build_result(cycle, settings)
         # Persist the exhale ADC trace next to the record.
-        result["curve_file"] = scan.save_curve(receipt_id, cycle)
+        result["curve_file"] = scan.save_curve(receipt_id, cycle, measure_seconds)
         # Log every reading straight away, so the database holds an entry for
         # each test even if the officer never fills in the subject's details.
         # Saving the form later amends this same row (upsert on receipt_id).

@@ -134,7 +134,7 @@ class Terminal:
         print()
 
         result = scan.build_result(cycle, settings, now)
-        result["curve_file"] = scan.save_curve(receipt_id, cycle)
+        result["curve_file"] = scan.save_curve(receipt_id, cycle, measure_seconds)
         self._print_result(result)
 
         if result.get("baseline_stable") is False:

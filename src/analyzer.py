@@ -191,18 +191,19 @@ class BreathAnalyzer:
         """Release hardware safely on exit; no-op for the mock."""
 
 
-def _mock_bell(measure_ms: float, baseline: float, peak_delta: float,
+def _mock_bell(trace_ms: float, baseline: float, peak_delta: float,
+               source: int = SRC_AD7798,
                step_ms: int = 100) -> tuple[tuple[int, float, float, float], ...]:
-    """A positive bell-shaped exhale trace for development machines, shaped
-    like the real PID response (rise, peak mid-blow, decay)."""
-    centre = measure_ms * 0.45
-    width = max(1.0, measure_ms * 0.22)
+    """A positive bell-shaped trace for development machines, shaped like the
+    real response: rise through the blow, peak, then decay through the tail."""
+    centre = trace_ms * 0.45
+    width = max(1.0, trace_ms * 0.22)
     samples = []
-    for t_ms in range(0, int(measure_ms) + 1, step_ms):
+    for t_ms in range(0, int(trace_ms) + 1, step_ms):
         bell = math.exp(-((t_ms - centre) ** 2) / (2 * width * width))
         delta = peak_delta * bell + random.uniform(-0.4, 0.4)
         samples.append((t_ms, round(baseline + delta, 1), round(delta, 2),
-                        sample_mv(SRC_AD7798, delta)))
+                        sample_mv(source, delta)))
     return tuple(samples)
 
 
@@ -221,6 +222,7 @@ class MockAnalyzer(BreathAnalyzer):
                     ("purge", config.PURGE_SECONDS),
                     ("baseline", config.BASELINE_SECONDS),
                     ("measure", max(1.0, measure_seconds)),
+                    ("recovery", max(0.0, config.RECOVERY_SECONDS)),
                 )
                 for phase, total in phases:
                     started = time.monotonic()
@@ -234,24 +236,31 @@ class MockAnalyzer(BreathAnalyzer):
 
                 alcohol_mvs = random.uniform(config.MOCK_ALCOHOL_MIN, config.MOCK_ALCOHOL_MAX)
                 cannabis_mvs = random.uniform(config.MOCK_CANNABIS_MIN, config.MOCK_CANNABIS_MAX)
+                # Trace spans the blow AND the recovery tail, so the mock
+                # produces the same full bell shape the board now records.
                 measure_ms = max(1.0, measure_seconds) * 1000.0
+                trace_ms = measure_ms + max(0.0, config.RECOVERY_SECONDS) * 1000.0
                 peak_ms = int((config.PURGE_SECONDS + config.BASELINE_SECONDS
                                + measure_seconds * random.uniform(0.3, 0.7)) * 1000)
                 cannabis_baseline = round(random.uniform(400, 800), 1)
                 cannabis_peak = round(cannabis_mvs * 40, 1)
+                alcohol_baseline = round(random.uniform(300, 1500), 1)
+                alcohol_peak = round(alcohol_mvs * 250, 1)
                 return CycleResult(
                     alcohol=ChannelResult(
-                        baseline=round(random.uniform(300, 1500), 1),        # nA
-                        peak=round(alcohol_mvs * 250, 1),                    # nA
+                        baseline=alcohol_baseline,                           # nA
+                        peak=alcohol_peak,                                   # nA
                         peak_t_ms=peak_ms,
                         integral_mvs=round(alcohol_mvs, 3),
+                        samples=_mock_bell(trace_ms, alcohol_baseline, alcohol_peak,
+                                           SRC_AD5941, step_ms=240),
                     ),
                     cannabis=ChannelResult(
                         baseline=cannabis_baseline,                          # codes
                         peak=cannabis_peak,                                  # codes
                         peak_t_ms=peak_ms,
                         integral_mvs=round(cannabis_mvs, 3),
-                        samples=_mock_bell(measure_ms, cannabis_baseline, cannabis_peak),
+                        samples=_mock_bell(trace_ms, cannabis_baseline, cannabis_peak),
                     ),
                 )
             finally:
@@ -545,7 +554,11 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             purge_ms = config.PURGE_SECONDS * 1000.0
             baseline_ms = config.BASELINE_SECONDS * 1000.0
             measure_ms = max(1.0, measure_seconds) * 1000.0
-            total_ms = purge_ms + baseline_ms + measure_ms
+            # Keep recording after the blow so the response falls back and the
+            # trace forms a full bell; the area split needs both flanks.
+            recovery_ms = max(0.0, config.RECOVERY_SECONDS) * 1000.0
+            blow_end_ms = purge_ms + baseline_ms + measure_ms
+            total_ms = blow_end_ms + recovery_ms
 
             stats = {s: {"base": [], "baseline": None, "integ": 0.0,
                          "peak": 0.0, "peak_t": 0, "prev": None, "stable": True,
@@ -597,8 +610,15 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                             elapsed, total = (dt - purge_ms) / 1000.0, baseline_ms / 1000.0
                             channel["base"].append((tick, value))
                         else:
-                            phase = "measure"
-                            elapsed, total = (dt - purge_ms - baseline_ms) / 1000.0, measure_ms / 1000.0
+                            if dt < blow_end_ms:
+                                phase = "measure"
+                                elapsed = (dt - purge_ms - baseline_ms) / 1000.0
+                                total = measure_ms / 1000.0
+                            else:
+                                # Blow is over; keep sampling the falling edge.
+                                phase = "recovery"
+                                elapsed = (dt - blow_end_ms) / 1000.0
+                                total = recovery_ms / 1000.0
                             if channel["baseline"] is None and channel["base"]:
                                 values = [v for _t, v in channel["base"]]
                                 channel["baseline"] = sum(values) / float(len(values))

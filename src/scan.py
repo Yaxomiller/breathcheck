@@ -56,11 +56,32 @@ def area_ratio(samples, threshold_mv: float) -> dict[str, float]:
     }
 
 
-def save_curve(receipt_id: str, cycle: "analyzer_module.CycleResult") -> str:
-    """Write the exhale ADC trace for this scan to data/curves/<receipt>.csv.
-    Returns the filename, or "" if there was nothing to write."""
-    samples = cycle.cannabis.samples
-    if not samples:
+CURVE_HEADER = ["time_ms", "phase", "sensor", "adc_raw", "delta_raw", "delta_mv"]
+
+
+def _curve_rows(cycle: "analyzer_module.CycleResult",
+                blow_seconds: float) -> list[list]:
+    """Every ADC reading from both sensors, in time order.
+
+    `time_ms` is measured from the start of the blow, so a 10s exhale is
+    0-10000 and the recovery tail runs past it.
+    """
+    blow_ms = max(0.0, blow_seconds) * 1000.0
+    rows: list[list] = []
+    for name, channel in (("ALCOHOL", cycle.alcohol), ("CANNABIS", cycle.cannabis)):
+        for t_ms, adc, delta, mv in channel.samples:
+            rows.append([t_ms, "blow" if t_ms < blow_ms else "recovery", name,
+                         round(adc, 3), round(delta, 3), round(mv, 5)])
+    rows.sort(key=lambda row: (row[0], row[2]))
+    return rows
+
+
+def save_curve(receipt_id: str, cycle: "analyzer_module.CycleResult",
+               blow_seconds: float = 10.0) -> str:
+    """Write this breath's full ADC trace to data/curves/<receipt>.csv, and
+    append it to the master log. Returns the filename, or "" if empty."""
+    rows = _curve_rows(cycle, blow_seconds)
+    if not rows:
         return ""
     safe_name = "".join(c for c in receipt_id if c.isalnum() or c in "-_") or "curve"
     filename = f"{safe_name}.csv"
@@ -69,13 +90,34 @@ def save_curve(receipt_id: str, cycle: "analyzer_module.CycleResult") -> str:
         path = Path(config.CURVE_DIR) / filename
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["time_ms", "adc_code", "delta_code", "delta_mv"])
-            for t_ms, adc, delta, mv in samples:
-                writer.writerow([t_ms, adc, round(delta, 3), round(mv, 5)])
+            writer.writerow(CURVE_HEADER)
+            writer.writerows(rows)
     except OSError as exc:
         logger.warning("could not write curve CSV for %s: %s", receipt_id, exc)
         return ""
+    _append_master_log(receipt_id, rows)
     return filename
+
+
+def _append_master_log(receipt_id: str, rows: list[list]) -> None:
+    """Append every reading to one growing CSV covering all breaths.
+
+    data/breaths.csv is the single file to pull off the device when you want
+    every sample from every test; the per-scan files stay for convenience.
+    """
+    try:
+        path = Path(config.BREATH_LOG_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not path.exists()
+        stamp = config.now_local().strftime("%Y-%m-%d %H:%M:%S")
+        with path.open("a", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            if new_file:
+                writer.writerow(["receipt_id", "recorded_ist", *CURVE_HEADER])
+            for row in rows:
+                writer.writerow([receipt_id, stamp, *row])
+    except OSError as exc:
+        logger.warning("could not append to the breath log: %s", exc)
 
 
 def new_receipt(counter: int, now: Optional[datetime] = None) -> str:
