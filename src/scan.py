@@ -56,7 +56,8 @@ def area_ratio(samples, threshold_mv: float) -> dict[str, float]:
     }
 
 
-CURVE_HEADER = ["time_ms", "phase", "sensor", "adc_raw", "delta_raw", "delta_mv"]
+CURVE_HEADER = ["timestamp", "time_ms", "phase", "sensor",
+                "adc_raw", "delta_raw", "delta_mv"]
 
 
 def _curve_rows(cycle: "analyzer_module.CycleResult",
@@ -79,11 +80,21 @@ def _curve_rows(cycle: "analyzer_module.CycleResult",
             return "blow"
         return "baseline" if t_ms >= -baseline_ms else "purge"
 
+    blow_epoch = getattr(cycle, "blow_start_epoch", 0.0) or 0.0
+
+    def stamp(t_ms: float) -> str:
+        """Wall clock for one reading. time_ms is measured from the start of
+        the blow, so negative offsets land correctly in the purge/baseline."""
+        if not blow_epoch:
+            return ""
+        moment = datetime.fromtimestamp(blow_epoch + t_ms / 1000.0)
+        return moment.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
     for name, channel in (("ALCOHOL", cycle.alcohol), ("CANNABIS", cycle.cannabis)):
         for t_ms, adc, delta, mv in channel.samples:
-            rows.append([t_ms, phase_of(t_ms), name,
+            rows.append([stamp(t_ms), t_ms, phase_of(t_ms), name,
                          round(adc, 3), round(delta, 3), round(mv, 5)])
-    rows.sort(key=lambda row: (row[0], row[2]))
+    rows.sort(key=lambda row: (row[1], row[3]))
     return rows
 
 

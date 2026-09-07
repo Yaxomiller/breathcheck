@@ -158,6 +158,10 @@ class ChannelResult:
 class CycleResult:
     alcohol: ChannelResult    # AD5941 fuel cell
     cannabis: ChannelResult   # AD7798 PID
+    # Host clock (epoch seconds) at the instant the blow window opened, i.e.
+    # where every sample's time_ms is zero. Lets each reading in the logged
+    # trace carry a real wall-clock timestamp. 0.0 when unknown (mock).
+    blow_start_epoch: float = 0.0
 
 
 def _mvs(src: int, integ_raw_ms: float) -> float:
@@ -617,6 +621,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                          "samples": [], "pre": [], "fit": (0.0, 0.0)}
                      for s in (SRC_AD7798, SRC_AD5941)}
             t0: Optional[int] = None   # STM32 tick of first AD5941 sample
+            t0_epoch = 0.0             # host clock at that same sample
             try:
                 if progress:
                     progress("starting", 0.0, 0.0)
@@ -660,11 +665,16 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                     for tick, source, value in records:
                         if t0 is None and source == SRC_AD5941:
                             t0 = tick   # anchor on first alcohol sample
+                            # Host clock at the same instant, so the logged
+                            # trace can carry wall-clock timestamps.
+                            t0_epoch = time.time()
                         if source not in stats or t0 is None or tick < t0:
                             continue
                         dt = tick - t0
                         if dt >= total_ms:   # cycle complete
-                            return self._build_result(stats)
+                            return self._build_result(
+                                stats,
+                                blow_start_epoch=t0_epoch + (purge_ms + baseline_ms) / 1000.0)
                         channel = stats[source]
                         if dt < purge_ms:
                             phase, elapsed, total = "purge", dt / 1000.0, purge_ms / 1000.0
@@ -893,7 +903,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 except Exception:
                     pass
 
-    def _build_result(self, stats: dict) -> CycleResult:
+    def _build_result(self, stats: dict, blow_start_epoch: float = 0.0) -> CycleResult:
         def channel(source: int) -> ChannelResult:
             data = stats[source]
             baseline = data["baseline"] if data["baseline"] is not None else 0.0
@@ -920,7 +930,8 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 fit_intercept=_finite(round(intercept, 3)),
                 fit_slope=_finite(round(slope, 9)),
             )
-        return CycleResult(alcohol=channel(SRC_AD5941), cannabis=channel(SRC_AD7798))
+        return CycleResult(alcohol=channel(SRC_AD5941), cannabis=channel(SRC_AD7798),
+                           blow_start_epoch=blow_start_epoch)
 
 
 def resolve_analyzer() -> BreathAnalyzer:

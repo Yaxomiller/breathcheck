@@ -637,19 +637,6 @@ function downloadCsv(url, label) {
   toast(`${label} DOWNLOADING`);
 }
 
-/* Wipe every stored test. Double-confirmed: this cannot be undone. */
-async function clearDatabase() {
-  if (!confirm("Delete ALL records? This cannot be undone.")) return;
-  if (!confirm("Are you sure? Every test record will be erased.")) return;
-  try {
-    const result = await api("/api/records?confirm=ERASE", { method: "DELETE" });
-    toast(`CLEARED ${result.deleted}`);
-    loadRecords($("#db-search").value.trim());
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
 function bindEvents() {
   document.querySelectorAll("[data-nav]").forEach((el) =>
     el.addEventListener("click", () => showScreen(el.dataset.nav)));
@@ -680,7 +667,6 @@ function bindEvents() {
     () => downloadCsv("/api/breaths.csv", "ADC LOG"));
   $("#btn-db-export").addEventListener("click",
     () => downloadCsv("/api/export.csv", "RECORDS"));
-  $("#btn-db-clear").addEventListener("click", clearDatabase);
 
   $("#modal-close").addEventListener("click", () => $("#modal").classList.add("hidden"));
   $("#modal").addEventListener("click", (event) => {
