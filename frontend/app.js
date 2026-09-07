@@ -201,11 +201,13 @@ async function refreshScanReadyStatus() {
       button.textContent = "TEST RUNNING";
       $("#scan-ready-hint").textContent = "SENSOR IS FINISHING THE CURRENT TEST — PLEASE WAIT";
     } else {
-      const stabilizeSeconds = Math.ceil(Number(status.purge_seconds) || 15);
-      const baselineSeconds = Math.ceil(Number(status.baseline_seconds) || 5);
+      // Purge and baseline are one wait as far as the officer is concerned:
+      // put the pump down and don't blow. Show the total, not the split.
+      const stabilizeSeconds = Math.ceil(
+        (Number(status.purge_seconds) || 1) + (Number(status.baseline_seconds) || 4));
       button.textContent = "START";
       $("#scan-ready-hint").textContent =
-        `READY — ${stabilizeSeconds}s STABILIZE + ${baselineSeconds}s BASELINE, THEN BLOW`;
+        `READY — ${stabilizeSeconds}s STABILIZE, THEN BLOW`;
       clearInterval(state.timers.poll);
       state.timers.poll = null;
     }
@@ -622,6 +624,19 @@ function applyBrightness(percent) {
   $("#dim").style.opacity = String(((100 - percent) / 100) * 0.75);
 }
 
+/* Save a CSV the backend serves. Both export endpoints set Content-Disposition
+   to attachment, so a hidden anchor is enough — the browser downloads without
+   navigating away from the kiosk. */
+function downloadCsv(url, label) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  toast(`${label} DOWNLOADING`);
+}
+
 /* Wipe every stored test. Double-confirmed: this cannot be undone. */
 async function clearDatabase() {
   if (!confirm("Delete ALL records? This cannot be undone.")) return;
@@ -661,6 +676,10 @@ function bindEvents() {
     const row = event.target.closest("tr[data-id]");
     if (row) openRecordDetail(Number(row.dataset.id));
   });
+  $("#btn-db-adc").addEventListener("click",
+    () => downloadCsv("/api/breaths.csv", "ADC LOG"));
+  $("#btn-db-export").addEventListener("click",
+    () => downloadCsv("/api/export.csv", "RECORDS"));
   $("#btn-db-clear").addEventListener("click", clearDatabase);
 
   $("#modal-close").addEventListener("click", () => $("#modal").classList.add("hidden"));

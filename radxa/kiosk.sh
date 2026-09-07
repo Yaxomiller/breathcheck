@@ -39,16 +39,38 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-BROWSER=""
+CHROMIUM=""
 for candidate in chromium chromium-browser google-chrome; do
   if command -v "$candidate" >/dev/null 2>&1; then
-    BROWSER=$candidate
+    CHROMIUM=$candidate
     break
   fi
 done
-if [[ -z $BROWSER ]]; then
-  echo "No Chromium browser found — open $URL manually" >&2
-  exit 1
+FIREFOX=""
+for candidate in firefox firefox-esr; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    FIREFOX=$candidate
+    break
+  fi
+done
+
+# Some Allwinner boards cannot run Chromium at all: it dies instantly with
+# SIGILL (exit 132) and the screen just stays black with nothing obvious in
+# the logs. Firefox works there, so fall back to it rather than leaving a
+# blank kiosk. Chromium stays the default where it runs — it starts faster
+# and honours --use-fake-ui-for-media-stream for the exhale photo.
+start_firefox() {
+  if [[ -z $FIREFOX ]]; then
+    echo "No usable browser found — open $URL manually" >&2
+    exit 1
+  fi
+  echo "starting $FIREFOX in kiosk mode"
+  exec "$FIREFOX" --kiosk "$URL"
+}
+
+if [[ -z $CHROMIUM ]]; then
+  echo "No Chromium browser installed; trying Firefox"
+  start_firefox
 fi
 
 # --use-fake-ui-for-media-stream auto-grants the camera permission so the
@@ -58,7 +80,9 @@ fi
 # can't satisfy Chromium's hardware buffer allocation (gbm_wrapper
 # "Failed to export buffer to dma_buf" errors) — render in software instead,
 # which is plenty fast for this plain HTML/CSS kiosk UI.
-exec "$BROWSER" \
+echo "starting $CHROMIUM in kiosk mode"
+started=$SECONDS
+"$CHROMIUM" \
   --kiosk "$URL" \
   --incognito \
   --noerrdialogs \
@@ -73,3 +97,14 @@ exec "$BROWSER" \
   --disable-gpu \
   --disable-gpu-compositing \
   --disable-dev-shm-usage
+status=$?
+
+# Only a failure *at startup* means Chromium cannot run here. A non-zero exit
+# after the kiosk has been up for a while is a crash or a manual kill, and
+# silently swapping browsers then would just be confusing.
+if (( status != 0 && SECONDS - started < 15 )); then
+  echo "$CHROMIUM exited with status $status after $((SECONDS - started))s" >&2
+  echo "(132 = SIGILL: unsupported CPU instruction) — falling back to Firefox" >&2
+  start_firefox
+fi
+exit "$status"

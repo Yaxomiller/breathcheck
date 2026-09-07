@@ -76,7 +76,7 @@ cat > "$AUTOSTART_DIR/breathcheck-kiosk.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=BreathCheck Kiosk
-Exec=$APP_DIR/radxa/kiosk.sh
+Exec=$APP_DIR/radxa/kiosk.sh --boot-delay
 X-GNOME-Autostart-enabled=true
 DESKTOP
 chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.config"

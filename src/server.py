@@ -13,7 +13,8 @@ Serves the kiosk frontend plus a small JSON API:
   GET  /api/settings          persisted device settings
   PUT  /api/settings          update settings (applies backlight)
   POST /api/time              set system clock
-  GET  /api/export.csv        full CSV export
+  GET  /api/export.csv        full CSV export (one row per test record)
+  GET  /api/breaths.csv       every ADC sample of both sensors, all breaths
 """
 from __future__ import annotations
 
@@ -547,6 +548,58 @@ def export_csv() -> StreamingResponse:
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@app.get("/api/sensors/live")
+def sensors_live() -> dict[str, Any]:
+    """Newest raw ADC reading from each sensor, with no interpretation.
+
+    Read from the frame stream the analyzer already runs, so this works while
+    the app is up and scanning — unlike rawlog.py, which needs the service
+    stopped so it can take the SPI bus for itself.
+
+    `adc_raw` is in each sensor's native units (AD5941 nA, AD7798 codes);
+    `mv` is the same figure scaled. Neither has a baseline subtracted.
+    """
+    live = dict(getattr(_analyzer, "live", {}))
+    now = time.time()
+    payload: dict[str, Any] = {
+        "server_time": config.now_local().strftime("%H:%M:%S.%f")[:-3],
+        "analyzer": _analyzer.name,
+        "state": _analyzer.state,
+        "stream_ok": _analyzer.stream_ok,
+    }
+    for name, source in (("alcohol", analyzer_module.SRC_AD5941),
+                         ("cannabis", analyzer_module.SRC_AD7798)):
+        entry = live.get(source)
+        if entry is None:
+            payload[name] = None
+            continue
+        stamp, tick, value = entry
+        payload[name] = {
+            "adc_raw": round(value, 1),
+            "mv": round(analyzer_module.sample_mv(source, value), 4),
+            "tick_ms": tick,
+            "age_s": round(now - stamp, 2),
+        }
+    return payload
+
+
+@app.get("/api/breaths.csv")
+def breath_log_csv() -> FileResponse:
+    """Every ADC sample of both sensors, from every breath ever measured.
+
+    scan.save_curve appends each completed test to this file, so the history
+    is already on disk; this route just hands it over, so the traces can be
+    pulled off the handheld from a browser instead of over SSH. Columns are
+    receipt_id, recorded_ist, then CURVE_HEADER.
+    """
+    path = config.BREATH_LOG_FILE
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No breaths recorded yet")
+    stamp = config.now_local().strftime("%Y%m%d_%H%M%S")
+    return FileResponse(path, media_type="text/csv",
+                        filename=f"breaths_{stamp}.csv")
 
 
 # --- Frontend (must be mounted last) ---------------------------------------------------

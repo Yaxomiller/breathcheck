@@ -478,6 +478,12 @@ body.kb-open .screen { bottom: var(--kb-h); }
 }
 
 .db-actions { padding: 12px 0 4px; }
+/* Three buttons share this row, so they need a narrower basis than the
+   two-button rows elsewhere or the labels wrap on the 800px panel. */
+.db-actions .btn-secondary {
+  flex: 1 1 0; padding-left: 12px; padding-right: 12px;
+  letter-spacing: 1.5px; white-space: nowrap;
+}
 .btn-secondary.danger { color: var(--bad); border-color: rgba(239, 68, 68, .45); }
 
 .form-hint { font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--muted); padding: 2px 2px 6px; }

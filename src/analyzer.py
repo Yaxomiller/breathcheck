@@ -172,6 +172,9 @@ class BreathAnalyzer:
     startup_warnings: tuple[str, ...] = ()
     state = "ready"   # ready | stabilizing | measuring | finishing | error
     stream_ok = True  # False while the doorbell/frame stream is dead
+    # Newest raw reading per source: {source: (host_time, stm32_tick, value)}.
+    # Never mutated on the base class; each analyzer owns its own dict.
+    live: dict[int, tuple[float, int, float]] = {}
 
     def run_cycle(self, measure_seconds: float, progress: Optional[ProgressFn] = None) -> CycleResult:
         raise NotImplementedError
@@ -325,6 +328,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         )
         self.last_stabilize: dict[str, Any] = {}
         self.stabilize_started_at: Optional[float] = None
+        self.live: dict[int, tuple[float, int, float]] = {}
 
         # Request BRD_ON atomically high, open the bus, then perform one
         # deliberate reset so every backend start begins from a known STM32
@@ -387,6 +391,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         if error is None:
             self._last_frame_at = time.monotonic()
             self.stream_ok = True
+            self._note_live(records)
         # Let the STM32 deassert. PID lamp startup keeps the STM32 busy well
         # past a second, so a slow deassert after a VALID frame must not fail
         # the exchange — the command was already latched. The bound exists
@@ -454,6 +459,21 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 pass   # never let the keepalive die; next pass retries
             finally:
                 self._lock.release()
+
+    def _note_live(self, records: Optional[list[tuple[int, int, int]]]) -> None:
+        """Remember the newest reading from each sensor.
+
+        Every decoded frame passes through here, the idle keepalive included,
+        so a live view works whether or not a scan is running. Raw values
+        only — no baseline, no drift fit — so this reports what the ADCs
+        actually measured, which is the one thing no processing can distort.
+        """
+        if not records:
+            return
+        now = time.time()
+        for tick, source, value in records:
+            if source in (SRC_AD7798, SRC_AD5941):
+                self.live[source] = (now, tick, float(value))
 
     def _release_pid_lamp(self) -> None:
         """End-of-run lamp handling, shared by every sampling path.

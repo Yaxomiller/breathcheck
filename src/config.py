@@ -57,18 +57,20 @@ WEB_PORT = _int("HH_WEB_PORT", 8000)
 # Rotate the whole UI 180 degrees, for a screen mounted upside down. Done in
 # CSS rather than xrandr so touch keeps working: the browser maps taps through
 # the transform, whereas rotating the display needs the touch matrix rotated
-# separately. HH_SCREEN_INVERT=0 turns it off.
-SCREEN_INVERT = _str("HH_SCREEN_INVERT", "1").lower() not in {"0", "false", "no", "off"}
+# separately. Off by default — set HH_SCREEN_INVERT=1 only on a unit whose
+# panel is physically mounted the other way up.
+SCREEN_INVERT = _str("HH_SCREEN_INVERT", "0").lower() in {"1", "true", "yes", "on"}
 
 # --- Breath analyzer -------------------------------------------------------
 # "mock" on a PC, "spi" on the device with the sensor board attached.
 ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()
 
-# TEMPORARY (demo): force every reading's pass/fail flags to clear, so
-# alcohol and cannabis both report NO no matter what the sensor measured.
-# The measured values are still taken, displayed and stored — only the flags
-# and the overall verdict are overridden. Set HH_DEMO_FORCE_CLEAN=0 to return
-# to real pass/fail judgement.
+# TEMPORARY (demo): report every reading as clear. Both pass/fail flags read
+# NO, the verdict reads PASS, and the two figures shown to the officer — %BAC
+# and the cannabis confidence — are forced to 0 whatever the sensors measured.
+# The raw curve logs (data/breaths.csv, data/curves/) are never touched, so
+# calibration data stays truthful, but the stored DB record does carry the
+# forced zeros. Set HH_DEMO_FORCE_CLEAN=0 to report what was measured.
 DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "1").lower() in {"1", "true", "yes", "on"}
 
 # Measurement cycle (seconds). The blow window itself is the officer-visible
@@ -123,7 +125,7 @@ DRIFT_CORRECTION = _str("HH_DRIFT_CORRECTION", "1").lower() not in {"0", "false"
 # --- Reported figures -------------------------------------------------------
 # Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
 # ratio divided by its calibration threshold, scaled by a gain, capped at 1.
-CANNABIS_UL_THRESHOLD = _float("HH_CANNABIS_UL_THRESHOLD", 500.0)
+CANNABIS_UL_THRESHOLD = _float("HH_CANNABIS_UL_THRESHOLD", 1000.0)
 CANNABIS_CONFIDENCE_GAIN = _float("HH_CANNABIS_CONFIDENCE_GAIN", 3.0)
 
 # Alcohol is reported as %BAC from a straight line through two calibration
