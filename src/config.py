@@ -116,7 +116,7 @@ RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 # threshold splits the area under it into an upper section (the part of the
 # curve poking above the line) and a lower section (the part beneath it).
 # The reported ratio is upper / lower.
-CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
+CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 500.0)
 
 # Project the baseline's own drift across the measure window and subtract it,
 # instead of holding the baseline flat at its mean. A sensor that is still
@@ -127,9 +127,7 @@ DRIFT_CORRECTION = _str("HH_DRIFT_CORRECTION", "1").lower() not in {"0", "false"
 
 # --- Reported figures -------------------------------------------------------
 # Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
-# ratio divided by its calibration threshold, scaled by a gain, capped at 1.
-CANNABIS_UL_THRESHOLD = _float("HH_CANNABIS_UL_THRESHOLD", 1000.0)
-CANNABIS_CONFIDENCE_GAIN = _float("HH_CANNABIS_CONFIDENCE_GAIN", 3.0)
+# ratio itself, clamped. No divisor, no gain.
 
 # Alcohol is reported as %BAC from a straight line through two calibration
 # points: the reading that means sober, and a reading of known concentration.
@@ -139,15 +137,12 @@ BAC_REF_PERCENT = _float("HH_BAC_REF_PERCENT", 0.2)
 
 
 def confidence_score(ul_ratio: float) -> float:
-    """Cannabis upper/lower ratio -> confidence between 0 and 1.
+    """Cannabis upper/lower area ratio -> confidence between 0 and 1.
 
-    The ratio over its threshold is multiplied by CANNABIS_CONFIDENCE_GAIN
-    (3x) and then capped, so anything that would exceed 1 reports exactly 1.
+    The ratio IS the score: 0.62 reports as 0.620. Clamped at both ends, so
+    more area above the line than below reports exactly 1.000.
     """
-    if CANNABIS_UL_THRESHOLD <= 0:
-        return 0.0
-    scaled = float(ul_ratio) / CANNABIS_UL_THRESHOLD * CANNABIS_CONFIDENCE_GAIN
-    return max(0.0, min(1.0, scaled))
+    return max(0.0, min(1.0, float(ul_ratio)))
 
 
 def bac_percent(reading: float) -> float:
