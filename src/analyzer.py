@@ -667,9 +667,21 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                             if channel["baseline"] is None and channel["base"]:
                                 values = [v for _t, v in channel["base"]]
                                 channel["baseline"] = sum(values) / float(len(values))
-                                spread = max(values) - min(values)
-                                channel["stable"] = spread <= BASELINE_SPREAD_WARN[source]
                                 channel["fit"] = _fit_line(channel["base"])
+                                # Judge stability on what is left AFTER the
+                                # drift line is removed. A sensor still
+                                # settling ramps steadily, and that ramp is
+                                # subtracted during the blow, so counting it
+                                # as instability just rejects good tests.
+                                # Jitter and steps still fail, as they should.
+                                if config.DRIFT_CORRECTION:
+                                    intercept, slope = channel["fit"]
+                                    residual = [v - (intercept + slope * t)
+                                                for t, v in channel["base"]]
+                                    spread = max(residual) - min(residual)
+                                else:
+                                    spread = max(values) - min(values)
+                                channel["stable"] = spread <= BASELINE_SPREAD_WARN[source]
                             if channel["baseline"] is not None:
                                 # Subtract the baseline's own drift, projected
                                 # forward. A sensor still settling ramps by far
