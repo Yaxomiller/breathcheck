@@ -56,16 +56,24 @@ def area_ratio(samples, threshold_mv: float) -> dict[str, float]:
     }
 
 
-CURVE_HEADER = ["timestamp", "time_ms", "phase", "sensor",
-                "adc_raw", "delta_raw", "delta_mv"]
+# Same columns livemon.py prints, plus the two a breath cycle needs that a
+# live view has no concept of: which phase the reading fell in, and how far it
+# sat from the start of the blow.
+CURVE_HEADER = ["time", "alc_nA", "alc_mV", "pid_code", "pid_mV",
+                "phase", "time_ms"]
 
 
 def _curve_rows(cycle: "analyzer_module.CycleResult",
                 blow_seconds: float) -> list[list]:
-    """Every ADC reading from both sensors, in time order.
+    """Every ADC reading from both sensors, in time order, RAW.
+
+    Values are exactly what the ADCs reported -- no baseline subtracted, no
+    drift line, no thresholds -- so this file agrees with livemon.py sample
+    for sample. Anything derived belongs in the result, not the trace.
 
     `time_ms` is measured from the start of the blow, so a 10s exhale is
-    0-10000 and the recovery tail runs past it.
+    0-10000, the recovery tail runs past it, and the purge and baseline that
+    came before it carry negative times.
     """
     blow_ms = max(0.0, blow_seconds) * 1000.0
     baseline_ms = max(0.0, config.BASELINE_SECONDS) * 1000.0
@@ -90,11 +98,34 @@ def _curve_rows(cycle: "analyzer_module.CycleResult",
         moment = datetime.fromtimestamp(blow_epoch + t_ms / 1000.0)
         return moment.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-    for name, channel in (("ALCOHOL", cycle.alcohol), ("CANNABIS", cycle.cannabis)):
-        for t_ms, adc, delta, mv in channel.samples:
-            rows.append([stamp(t_ms), t_ms, phase_of(t_ms), name,
-                         round(adc, 3), round(delta, 3), round(mv, 5)])
-    rows.sort(key=lambda row: (row[1], row[3]))
+    # Merge both channels onto one timeline. The two ADCs sample at different
+    # instants and never share a timestamp, so each row carries the other
+    # channel's most recent reading forward -- the same thing livemon does
+    # between polls, and the reason a row is never half empty.
+    points: list[tuple[int, bool, float]] = []
+    for is_alcohol, channel in ((True, cycle.alcohol), (False, cycle.cannabis)):
+        for t_ms, adc, _delta, _mv in channel.samples:
+            points.append((t_ms, is_alcohol, adc))
+    points.sort(key=lambda point: (point[0], not point[1]))
+
+    alc: Optional[float] = None
+    pid: Optional[float] = None
+    for t_ms, is_alcohol, adc in points:
+        if is_alcohol:
+            alc = adc
+        else:
+            pid = adc
+        if alc is None or pid is None:
+            continue   # wait for both, so no row is ever half empty
+        rows.append([
+            stamp(t_ms),
+            round(alc, 1),
+            round(analyzer_module.sample_mv(analyzer_module.SRC_AD5941, alc), 4),
+            round(pid, 1),
+            round(analyzer_module.sample_mv(analyzer_module.SRC_AD7798, pid), 4),
+            phase_of(t_ms),
+            t_ms,
+        ])
     return rows
 
 

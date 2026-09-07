@@ -276,6 +276,9 @@ class MockAnalyzer(BreathAnalyzer):
                         integral_mvs=round(cannabis_mvs, 3),
                         samples=_mock_bell(trace_ms, cannabis_baseline, cannabis_peak),
                     ),
+                    # So a trace logged on a development machine carries real
+                    # timestamps too, in the same format the board produces.
+                    blow_start_epoch=time.time(),
                 )
             finally:
                 self.state = "ready"
