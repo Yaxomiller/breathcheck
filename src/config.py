@@ -79,6 +79,9 @@ DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "1").lower() in {"1", "true", "ye
 # then 5s more recording while the sensors fall back. That tail matters: without
 # it the trace is cut off at peak, so it never forms a bell and the upper/lower
 # area split is measured against a truncated lower area, inflating the ratio.
+# Discard queued board records at the start of a cycle before anchoring the
+# clock, so a sample taken while idle cannot shift the phase boundaries.
+CYCLE_FLUSH_SECONDS = _float("HH_CYCLE_FLUSH_SECONDS", 0.25)
 PURGE_SECONDS = _float("HH_PURGE_SECONDS", 1.0)        # pump on, discard
 BASELINE_SECONDS = _float("HH_BASELINE_SECONDS", 4.0)  # fresh-air zero
 RECOVERY_SECONDS = _float("HH_RECOVERY_SECONDS", 5.0)  # falling edge after the blow

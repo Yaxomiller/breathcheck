@@ -142,9 +142,16 @@ class ChannelResult:
     peak_t_ms: int         # ms into the cycle at the peak
     integral_mvs: float    # trapezoidal integral of the delta, mV*s
     stable: bool = True    # baseline spread within tolerance
-    # Exhale trace, one entry per sample in the MEASURE window:
-    # (ms into the blow, raw ADC value, delta above baseline, delta in mV)
+    # Full trace, one entry per sample:
+    # (ms relative to the START OF THE BLOW, raw ADC value, delta, delta mV)
+    # Purge and baseline samples carry NEGATIVE times, so the readings the
+    # drift line was fitted to are visible alongside the ones it corrected.
     samples: tuple[tuple[int, float, float, float], ...] = ()
+    # The fitted drift line, in raw units against the STM32 tick. Recorded so
+    # a bad reading can be traced to the line that produced it instead of
+    # being reverse-engineered from the deltas.
+    fit_intercept: float = 0.0
+    fit_slope: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -607,7 +614,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
 
             stats = {s: {"base": [], "baseline": None, "integ": 0.0,
                          "peak": 0.0, "peak_t": 0, "prev": None, "stable": True,
-                         "samples": [], "fit": (0.0, 0.0)}
+                         "samples": [], "pre": [], "fit": (0.0, 0.0)}
                      for s in (SRC_AD7798, SRC_AD5941)}
             t0: Optional[int] = None   # STM32 tick of first AD5941 sample
             try:
@@ -629,6 +636,17 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 # the board wakes. Do not charge that time to the measurement
                 # deadline or the first scan can fail after partially starting
                 # the sensor, only for an immediate retry to work.
+                # Drop whatever the STM32 queued before this cycle began. t0
+                # anchors on the first AD5941 record we read, so one stale
+                # record -- sampled while idle, before the pump started, or
+                # left over from the previous scan -- shifts every phase
+                # boundary and fits the baseline to air from a different
+                # moment. Cheap insurance: the board buffers up to 20 records,
+                # about 0.6s of data at the AFE's rate.
+                flush_until = time.monotonic() + config.CYCLE_FLUSH_SECONDS
+                while time.monotonic() < flush_until:
+                    self._wait_frame(timeout=0.1)
+
                 wall_deadline = time.monotonic() + total_ms / 1000.0 + 30.0
                 if progress:
                     progress("purge", 0.0, purge_ms / 1000.0)
@@ -650,10 +668,14 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                         channel = stats[source]
                         if dt < purge_ms:
                             phase, elapsed, total = "purge", dt / 1000.0, purge_ms / 1000.0
+                            channel["pre"].append((int(dt - purge_ms - baseline_ms),
+                                                   tick, value))
                         elif dt < purge_ms + baseline_ms:
                             phase = "baseline"
                             elapsed, total = (dt - purge_ms) / 1000.0, baseline_ms / 1000.0
                             channel["base"].append((tick, value))
+                            channel["pre"].append((int(dt - purge_ms - baseline_ms),
+                                                   tick, value))
                         else:
                             if dt < blow_end_ms:
                                 phase = "measure"
@@ -875,13 +897,28 @@ class SpiBreathAnalyzer(BreathAnalyzer):
         def channel(source: int) -> ChannelResult:
             data = stats[source]
             baseline = data["baseline"] if data["baseline"] is not None else 0.0
+            intercept, slope = data["fit"]
+            # Replay the purge/baseline readings through the same correction
+            # the blow got, so the logged trace shows the data the fit was
+            # built from. These do not touch the integral or the peak — they
+            # are a record of what happened, not part of the measurement.
+            pre: list[tuple[int, float, float, float]] = []
+            if data["baseline"] is not None:
+                for offset_ms, tick, value in data["pre"]:
+                    expected = (intercept + slope * tick
+                                if config.DRIFT_CORRECTION else baseline)
+                    delta = value - expected
+                    pre.append((offset_ms, float(value), float(delta),
+                                sample_mv(source, delta)))
             return ChannelResult(
                 baseline=_finite(round(baseline, 1)),
                 peak=_finite(round(data["peak"], 1)),
                 peak_t_ms=int(data["peak_t"]),
                 integral_mvs=_finite(round(_mvs(source, data["integ"]), 3)),
                 stable=bool(data["stable"]),
-                samples=tuple(data["samples"]),
+                samples=tuple(pre) + tuple(data["samples"]),
+                fit_intercept=_finite(round(intercept, 3)),
+                fit_slope=_finite(round(slope, 9)),
             )
         return CycleResult(alcohol=channel(SRC_AD5941), cannabis=channel(SRC_AD7798))
 

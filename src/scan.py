@@ -67,10 +67,21 @@ def _curve_rows(cycle: "analyzer_module.CycleResult",
     0-10000 and the recovery tail runs past it.
     """
     blow_ms = max(0.0, blow_seconds) * 1000.0
+    baseline_ms = max(0.0, config.BASELINE_SECONDS) * 1000.0
     rows: list[list] = []
+
+    def phase_of(t_ms: float) -> str:
+        # Negative times are the pre-blow window: the baseline the drift line
+        # was fitted to, and the purge discarded before it.
+        if t_ms >= blow_ms:
+            return "recovery"
+        if t_ms >= 0:
+            return "blow"
+        return "baseline" if t_ms >= -baseline_ms else "purge"
+
     for name, channel in (("ALCOHOL", cycle.alcohol), ("CANNABIS", cycle.cannabis)):
         for t_ms, adc, delta, mv in channel.samples:
-            rows.append([t_ms, "blow" if t_ms < blow_ms else "recovery", name,
+            rows.append([t_ms, phase_of(t_ms), name,
                          round(adc, 3), round(delta, 3), round(mv, 5)])
     rows.sort(key=lambda row: (row[0], row[2]))
     return rows
