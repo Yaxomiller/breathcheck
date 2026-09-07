@@ -455,14 +455,33 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             finally:
                 self._lock.release()
 
+    def _release_pid_lamp(self) -> None:
+        """End-of-run lamp handling, shared by every sampling path.
+
+        With PID_ALWAYS_ON the lamp stays lit so it holds thermal equilibrium
+        and the next baseline is flat; otherwise it is switched off. AFE
+        sampling is left running either way, because the doorbell frames it
+        produces are what carry the next command.
+        """
+        if config.PID_ALWAYS_ON:
+            return
+        try:
+            self._send_commands([CMD_PID_SHUTDOWN])
+        except Exception:
+            logger.exception("could not shut down the PID lamp")
+
     def _recover_stream(self) -> None:
         """Reset a silent board and restart AFE sampling in the background,
         so the next scan starts on a live doorbell instead of failing."""
         logger.warning("frame stream dead for %.0fs — resetting sensor board",
                        config.STREAM_DEAD_SECONDS)
         self._reset_board()
+        # A board reset extinguishes the lamp, so relight it here when it is
+        # meant to stay on -- otherwise the next scan silently runs cold again.
         self.stream_ok = self._send_commands(
-            [CMD_PID_SHUTDOWN, CMD_AFE_STARTUP], max_tries=8, timeout=0.5)
+            [CMD_PID_STARTUP if config.PID_ALWAYS_ON else CMD_PID_SHUTDOWN,
+             CMD_AFE_STARTUP],
+            max_tries=8, timeout=0.5)
         logger.warning("sensor board recovery %s",
                        "succeeded" if self.stream_ok else "FAILED")
         self._last_frame_at = time.monotonic()
@@ -481,7 +500,13 @@ class SpiBreathAnalyzer(BreathAnalyzer):
             started = self.stabilize_started_at
             try:
                 self.pump.write(False)   # priming happens in still air
-                startup_commands = [CMD_PID_SHUTDOWN, CMD_AFE_STARTUP]
+                # With PID_ALWAYS_ON the lamp is lit here, at app start, and
+                # left burning so it reaches thermal equilibrium long before
+                # the first scan; otherwise it stays off until a scan needs it.
+                startup_commands = [
+                    CMD_PID_STARTUP if config.PID_ALWAYS_ON else CMD_PID_SHUTDOWN,
+                    CMD_AFE_STARTUP,
+                ]
                 if not self._send_commands(startup_commands, max_tries=3):
                     recovered = True
                     self._reset_board()
@@ -662,12 +687,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 # "finishing" so scan screens don't read it as a live test —
                 # a new scan started now simply queues behind this lock.
                 self.state = "finishing"
-                # Shut down the PID lamp, but deliberately leave AFE sampling
-                # on so its doorbell frames can carry the next PID START.
-                try:
-                    self._send_commands([CMD_PID_SHUTDOWN])
-                except Exception:
-                    pass
+                self._release_pid_lamp()
                 self.state = "ready"
 
     def collect_samples(self, seconds: float, progress: Optional[Callable[[float, float], None]] = None,
@@ -731,10 +751,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 except Exception:
                     logger.exception("could not stop the pump after calibration sampling")
                 self.state = "finishing"
-                try:
-                    self._send_commands([CMD_PID_SHUTDOWN])
-                except Exception:
-                    pass
+                self._release_pid_lamp()
                 self.state = "ready"
 
     def stream_samples(self, callback: Callable[[int, int, float], None],
@@ -773,10 +790,7 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 except Exception:
                     logger.exception("could not stop the pump after streaming")
                 self.state = "finishing"
-                try:
-                    self._send_commands([CMD_PID_SHUTDOWN])
-                except Exception:
-                    pass
+                self._release_pid_lamp()
                 self.state = "ready"
 
     def shutdown(self) -> None:
@@ -806,6 +820,17 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 pump.write(False)
             except Exception:
                 logger.warning("could not drive the pump low on shutdown")
+
+        # Extinguish the lamp on the way out. With PID_ALWAYS_ON it is left
+        # burning between scans on purpose, but once the process is gone
+        # nothing is measuring, and BRD_ON stays high -- so without this it
+        # would burn until the board loses power, for no benefit. The next
+        # start relights it in stabilize() and it warms while the app boots.
+        if config.PID_ALWAYS_ON:
+            try:
+                self._send_commands([CMD_PID_SHUTDOWN], max_tries=3, timeout=0.5)
+            except Exception:
+                logger.warning("could not shut down the PID lamp on exit")
         for name in ("pump", "trigger", "ready", "spi"):
             resource = getattr(self, name, None)
             if resource is not None:

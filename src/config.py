@@ -168,6 +168,19 @@ SETTLE_SLOPE_NA_S = _float("HH_SETTLE_SLOPE_NA_S", 30.0)
 SETTLE_WINDOW_MS = _float("HH_SETTLE_WINDOW_MS", 10000.0)
 STABILIZE_MAX_S = _float("HH_STABILIZE_MAX_S", 180.0)
 
+# Keep the PID lamp powered between scans.
+#
+# Cycling it per scan meant every measurement began on a cold lamp, and the
+# baseline was fitted to the steepest part of its warm-up: measured on a dry
+# run, the drift line over-projected and delta walked to -4.2 mV (and to
+# -1694 mV with a 1s purge) where a correct correction reads ~0. Held at
+# thermal equilibrium the baseline is flat, so a short purge is enough and
+# the whole cycle can be brief.
+#
+# The cost is standby power and lamp hours; set HH_PID_ALWAYS_ON=0 to go back
+# to switching it per scan.
+PID_ALWAYS_ON = _str("HH_PID_ALWAYS_ON", "1").lower() in {"1", "true", "yes", "on"}
+
 # Mock reading ranges — integrals in mV*s, matching the live measurement.
 MOCK_ALCOHOL_MIN = _float("HH_MOCK_ALCOHOL_MIN", 0.0)
 MOCK_ALCOHOL_MAX = _float("HH_MOCK_ALCOHOL_MAX", 30.0)
