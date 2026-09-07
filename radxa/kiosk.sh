@@ -20,11 +20,23 @@ if [[ ${1:-} == "--boot-delay" ]]; then
   sleep "$delay"
 fi
 
-# Keep the screen awake and hide the mouse cursor (touchscreen).
+# Keep the screen awake. Setting this once at startup is not enough: a
+# desktop power manager can re-enable blanking after we run, and DPMS comes
+# back on a display hotplug. A road unit that blanks looks like a dead
+# device, so reassert it on a timer for as long as the kiosk is up.
+keep_awake() {
+  while true; do
+    xset s off        2>/dev/null || true
+    xset s noblank    2>/dev/null || true
+    xset -dpms        2>/dev/null || true
+    xset dpms 0 0 0   2>/dev/null || true
+    sleep "${HH_KEEP_AWAKE_SECONDS:-60}"
+  done
+}
 if command -v xset >/dev/null 2>&1; then
-  xset s off || true
-  xset s noblank || true
-  xset -dpms || true
+  keep_awake &
+  KEEP_AWAKE_PID=$!
+  trap 'kill "$KEEP_AWAKE_PID" 2>/dev/null || true' EXIT
 fi
 if command -v unclutter >/dev/null 2>&1; then
   unclutter -idle 1 -root &

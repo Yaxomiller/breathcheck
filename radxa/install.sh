@@ -81,6 +81,27 @@ X-GNOME-Autostart-enabled=true
 DESKTOP
 chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.config"
 
+echo "==> Keeping the device awake"
+# A road unit must never suspend: a dark screen is indistinguishable from a
+# dead device to the officer holding it. Mask the sleep targets outright
+# rather than trusting desktop power settings, which differ per desktop and
+# can be changed by hand. Screen blanking is handled separately, by kiosk.sh
+# reasserting xset on a timer.
+systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target \
+  >/dev/null 2>&1 || true
+if [[ -f /etc/systemd/logind.conf ]]; then
+  # Never suspend on idle, and never act on a lid switch this unit lacks.
+  sed -i 's/^#\?IdleAction=.*/IdleAction=ignore/' /etc/systemd/logind.conf
+  grep -q '^IdleAction=' /etc/systemd/logind.conf \
+    || echo 'IdleAction=ignore' >> /etc/systemd/logind.conf
+  echo "    logind IdleAction=ignore (applies on next boot)"
+fi
+# Stop the kernel blanking the text consoles too, so a dropout behind the
+# kiosk does not leave a black screen either.
+if command -v setterm >/dev/null 2>&1; then
+  setterm --blank 0 --powerdown 0 >/dev/tty1 2>/dev/null || true
+fi
+
 echo
 echo "==> Done."
 systemctl --no-pager --lines=0 status breathcheck.service || true
