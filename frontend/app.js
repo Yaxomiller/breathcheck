@@ -351,14 +351,14 @@ function trackCycle(session) {
 
       showPhase(phase, remaining, elapsed, total);
 
-      // Raw ADC from both sensors, straight through — AD5941 in nA, AD7798 in
-      // codes. No baseline, no drift correction: this is the number to trust
-      // while calibrating, and it matches livemon.py sample for sample.
+      // Both sensors in millivolts, straight through: no baseline, no drift
+      // correction. The same figures the CSV's alc_mV / pid_mV columns carry,
+      // so what is on screen can be checked against the logged trace.
       const live = status.live || {};
       $("#live-alc").textContent =
-        live.alcohol == null ? "--" : Math.round(live.alcohol);
+        live.alcohol == null ? "--" : live.alcohol.toFixed(2);
       $("#live-pid").textContent =
-        live.cannabis == null ? "--" : Math.round(live.cannabis);
+        live.cannabis == null ? "--" : live.cannabis.toFixed(2);
 
       if (isMeasure && !photoTaken && elapsed >= session.photo_second) {
         photoTaken = true;

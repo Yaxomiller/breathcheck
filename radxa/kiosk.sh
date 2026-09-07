@@ -77,7 +77,11 @@ start_firefox() {
     exit 1
   fi
   echo "starting $FIREFOX in kiosk mode"
-  exec "$FIREFOX" --kiosk "$URL"
+  # -private-window is Firefox's equivalent of Chromium's --incognito below:
+  # without it the frontend is cached across restarts, so a code update looks
+  # like it did nothing and the usual response is to reboot, which does not
+  # help either.
+  exec "$FIREFOX" --kiosk -private-window "$URL"
 }
 
 if [[ -z $CHROMIUM ]]; then

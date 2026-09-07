@@ -306,16 +306,21 @@ def scan_status(session_id: str) -> dict[str, Any]:
         drift = time.time() - result["phase_at"]
         elapsed = min(result["phase_total"], result["phase_elapsed"] + drift)
         result["phase_remaining"] = round(max(0.0, result["phase_total"] - elapsed), 2)
-        # Newest raw ADC reading from each sensor, so the scan screen can show
-        # what the sensors are doing as the cycle runs. Carried on this poll
-        # rather than a second request, so the numbers and the phase the
-        # officer sees always come from the same instant.
+        # Newest reading from each sensor in millivolts, so the scan screen can
+        # show what the sensors are doing as the cycle runs. Scaled from the
+        # raw value, with no baseline subtracted -- the same figure the CSV's
+        # alc_mV / pid_mV columns carry. Carried on this poll rather than a
+        # request of its own, so the numbers and the phase the officer sees
+        # always come from the same instant.
         live = dict(getattr(_analyzer, "live", {}))
         result["live"] = {
-            name: (None if entry is None else round(entry[2], 1))
-            for name, entry in (
-                ("alcohol", live.get(analyzer_module.SRC_AD5941)),
-                ("cannabis", live.get(analyzer_module.SRC_AD7798)),
+            name: (None if entry is None
+                   else round(analyzer_module.sample_mv(source, entry[2]), 3))
+            for name, source, entry in (
+                ("alcohol", analyzer_module.SRC_AD5941,
+                 live.get(analyzer_module.SRC_AD5941)),
+                ("cannabis", analyzer_module.SRC_AD7798,
+                 live.get(analyzer_module.SRC_AD7798)),
             )
         }
     return result
