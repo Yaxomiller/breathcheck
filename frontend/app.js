@@ -351,6 +351,15 @@ function trackCycle(session) {
 
       showPhase(phase, remaining, elapsed, total);
 
+      // Raw ADC from both sensors, straight through — AD5941 in nA, AD7798 in
+      // codes. No baseline, no drift correction: this is the number to trust
+      // while calibrating, and it matches livemon.py sample for sample.
+      const live = status.live || {};
+      $("#live-alc").textContent =
+        live.alcohol == null ? "--" : Math.round(live.alcohol);
+      $("#live-pid").textContent =
+        live.cannabis == null ? "--" : Math.round(live.cannabis);
+
       if (isMeasure && !photoTaken && elapsed >= session.photo_second) {
         photoTaken = true;
         // Browser capture (works only where getUserMedia can reach the camera).

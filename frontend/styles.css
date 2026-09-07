@@ -477,6 +477,19 @@ body.kb-open .screen { bottom: var(--kb-h); }
   #print-receipt .pr-big { text-align: center; font-size: 15px; font-weight: bold; margin: 4px 0; }
 }
 
+/* Raw ADC readout under the countdown. Deliberately quiet — it is a working
+   number for calibration, not something the officer acts on. Tabular figures
+   so the digits do not jitter as the values change. */
+.live-adc {
+  display: flex; justify-content: center; gap: 28px;
+  margin-top: 10px; font-size: 13px; letter-spacing: 1.5px;
+  color: var(--muted);
+}
+.live-adc b {
+  font-weight: 800; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .db-actions { padding: 12px 0 4px; }
 /* Three buttons share this row, so they need a narrower basis than the
    two-button rows elsewhere or the labels wrap on the 800px panel. */
