@@ -70,8 +70,11 @@ ANALYZER_MODE = _str("HH_ANALYZER_MODE", "mock").lower()
 # and the cannabis confidence — are forced to 0 whatever the sensors measured.
 # The raw curve logs (data/breaths.csv, data/curves/) are never touched, so
 # calibration data stays truthful, but the stored DB record does carry the
-# forced zeros. Set HH_DEMO_FORCE_CLEAN=0 to report what was measured.
-DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "1").lower() in {"1", "true", "yes", "on"}
+# forced zeros.
+# OFF by default: the app reports what the sensors measured. Opt in with
+# HH_DEMO_FORCE_CLEAN=1 for a demo, and turn it off again afterwards -- it
+# must never be the default, or the device quietly lies.
+DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "0").lower() in {"1", "true", "yes", "on"}
 
 # Measurement cycle (seconds). The blow window itself is the officer-visible
 # "scan time" setting; purge/baseline are hardware timings.
