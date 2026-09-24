@@ -400,10 +400,23 @@ function trackCycle(session) {
 const fmtBac = (r) => (Number(r.bac_percent) || 0).toFixed(3);
 const fmtConfidence = (r) => (Number(r.confidence) || 0).toFixed(3);
 
+/* The sensor-native numbers behind each figure, in small print. The converted
+   values depend on calibration constants; these do not, so they are what to
+   trust when a reading looks wrong. */
+function rawLine(baselineRaw, peakRaw, unit) {
+  const base = Math.round(Number(baselineRaw) || 0);
+  const peak = Math.round(Number(peakRaw) || 0);
+  return `ADC base ${base} · peak +${peak} ${unit}`;
+}
+
 function showResults(result) {
   showScanStage("scan-result");
   $("#val-alcohol").textContent = fmtBac(result);
   $("#val-cannabis").textContent = fmtConfidence(result);
+  $("#raw-alcohol").textContent =
+    rawLine(result.alcohol_baseline_raw, result.alcohol_peak_raw, "nA");
+  $("#raw-cannabis").textContent =
+    rawLine(result.cannabis_baseline_raw, result.cannabis_peak_raw, "codes");
   sndPass();
   if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
@@ -431,8 +444,14 @@ const DETAIL_FIELDS = {
   testing_officer: "#f-officer", address: "#f-address",
 };
 
+const TIME_FIELDS = ["#f-time-hh", "#f-time-mm"];
+
 function openDetailsForm() {
   Object.values(DETAIL_FIELDS).forEach((sel) => {
+    $(sel).value = "";
+    $(sel).classList.remove("invalid");
+  });
+  TIME_FIELDS.forEach((sel) => {
     $(sel).value = "";
     $(sel).classList.remove("invalid");
   });
@@ -440,6 +459,20 @@ function openDetailsForm() {
   $("#f-officer").value = state.details?.testing_officer
     || state.settings?.officer || "";
   state.details = null;
+}
+
+/* Manual clock override, used only when the device has no network and its own
+   time is wrong. Returns "HH:MM:00", "" when left blank, or null when what was
+   typed is not a real time. */
+function readTimeOverride() {
+  const hh = $("#f-time-hh").value.trim();
+  const mm = $("#f-time-mm").value.trim();
+  if (!hh && !mm) return "";
+  if (!/^\d{1,2}$/.test(hh) || !/^\d{1,2}$/.test(mm)) return null;
+  const hours = Number(hh);
+  const minutes = Number(mm);
+  if (hours > 23 || minutes > 59) return null;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`;
 }
 
 /* Collect the details, then move on to the exhalation. */
@@ -451,10 +484,17 @@ function startTestFromForm() {
     toast("NAME REQUIRED", true);
     return;
   }
+  const timeOverride = readTimeOverride();
+  if (timeOverride === null) {
+    TIME_FIELDS.forEach((sel) => $(sel).classList.add("invalid"));
+    toast("TIME MUST BE 00-23 : 00-59", true);
+    return;
+  }
   const details = {};
   for (const [key, sel] of Object.entries(DETAIL_FIELDS)) {
     details[key] = $(sel).value.trim();
   }
+  details.time_override = timeOverride;
   state.details = details;
   showScreen("scan");
 }
@@ -473,7 +513,10 @@ async function saveRecord() {
       receipt_id: scan.receipt_id,
       area: scan.area, version: scan.version, set_no: scan.set_no,
       counter: scan.counter,
-      test_date: result.test_date, test_time: result.test_time,
+      // A manually entered time wins over the device clock, which is wrong
+      // whenever the unit has been off the network with no RTC.
+      test_date: result.test_date,
+      test_time: details.time_override || result.test_time,
       calibr_date: scan.calibr_date,
       gps1: state.gpsFix.gps1, gps2: state.gpsFix.gps2,
       name,
@@ -532,7 +575,8 @@ function buildPrintReceipt(receiptId, name) {
   const rows = [
     ["Receipt", receiptId], ["Area", scan.area], ["Version", scan.version],
     ["Set No", scan.set_no], ["Counter", scan.counter],
-    ["Date", result.test_date], ["Time", result.test_time],
+    ["Date", result.test_date],
+    ["Time", details.time_override || result.test_time],
     ["Calibr Date", scan.calibr_date],
     ["GPS", `${state.gpsFix.gps1 || "--"} / ${state.gpsFix.gps2 || "--"}`],
     ["Name", name], ["ID No", details.dl_number || "--"],
@@ -657,6 +701,15 @@ function bindEvents() {
 
   $("#btn-form-cancel").addEventListener("click", goHome);
   $("#btn-form-start").addEventListener("click", startTestFromForm);
+  $("#btn-time-clear").addEventListener("click", () => {
+    TIME_FIELDS.forEach((sel) => {
+      $(sel).value = "";
+      $(sel).classList.remove("invalid");
+    });
+    toast("USING DEVICE TIME");
+  });
+  TIME_FIELDS.forEach((sel) => $(sel).addEventListener("input", () =>
+    TIME_FIELDS.forEach((s) => $(s).classList.remove("invalid"))));
   $("#btn-save-result").addEventListener("click", saveRecord);
   $("#f-name").addEventListener("input", () => $("#f-name").classList.remove("invalid"));
 

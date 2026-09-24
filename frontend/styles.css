@@ -500,3 +500,25 @@ body.kb-open .screen { bottom: var(--kb-h); }
 .btn-secondary.danger { color: var(--bad); border-color: rgba(239, 68, 68, .45); }
 
 .form-hint { font-size: 13px; font-weight: 700; letter-spacing: 1px; color: var(--muted); padding: 2px 2px 6px; }
+
+/* raw sensor values under each result — deliberately small, they are a
+   reference for when a converted figure looks wrong */
+.rc-raw {
+  margin-top: 6px;
+  font-size: 10px; letter-spacing: .4px;
+  color: var(--muted); opacity: .75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* manual clock override on the details form */
+.time-field > span i { font-style: normal; opacity: .6; font-size: 10px; }
+.time-inputs { display: flex; align-items: center; gap: 8px; }
+.time-inputs input { width: 68px; text-align: center; font-variant-numeric: tabular-nums; }
+.time-inputs b { color: var(--muted); font-size: 18px; }
+.btn-tiny {
+  margin-left: 4px; padding: 8px 12px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1px;
+  color: var(--muted); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.btn-tiny:active { background: var(--line); }

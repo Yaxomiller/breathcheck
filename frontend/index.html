@@ -103,11 +103,13 @@
         <div class="result-card" id="card-alcohol">
           <div class="rc-name">ALCOHOL</div>
           <div class="rc-value"><span id="val-alcohol">0.000</span><small id="unit-alcohol">%&nbsp;BAC</small></div>
+          <div class="rc-raw" id="raw-alcohol"></div>
         </div>
         <div class="result-card" id="card-cannabis">
           <div class="rc-name">CANNABIS</div>
           <div class="rc-value"><span id="val-cannabis">0.000</span></div>
           <div class="rc-sub">CONFIDENCE SCORE</div>
+          <div class="rc-raw" id="raw-cannabis"></div>
         </div>
       </div>
       <div class="row-buttons">
@@ -137,6 +139,17 @@
         <label class="field"><span>TEST LOCATION</span><input id="f-location" autocomplete="off"></label>
         <label class="field"><span>OFFICER</span><input id="f-officer" autocomplete="off"></label>
         <label class="field field-wide"><span>ADDRESS</span><input id="f-address" autocomplete="off"></label>
+        <!-- Only needed when the device has no network and its clock is wrong.
+             Left blank, the receipt prints the device time. -->
+        <div class="field field-wide time-field">
+          <span>TIME OVERRIDE <i>(only if clock is wrong)</i></span>
+          <div class="time-inputs">
+            <input id="f-time-hh" inputmode="numeric" maxlength="2" placeholder="HH" autocomplete="off">
+            <b>:</b>
+            <input id="f-time-mm" inputmode="numeric" maxlength="2" placeholder="MM" autocomplete="off">
+            <button type="button" id="btn-time-clear" class="btn-tiny">CLEAR</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="row-buttons form-actions">
