@@ -400,13 +400,16 @@ function trackCycle(session) {
 const fmtBac = (r) => (Number(r.bac_percent) || 0).toFixed(3);
 const fmtConfidence = (r) => (Number(r.confidence) || 0).toFixed(3);
 
-/* The sensor-native numbers behind each figure, in small print. The converted
-   values depend on calibration constants; these do not, so they are what to
-   trust when a reading looks wrong. */
-function rawLine(baselineRaw, peakRaw, unit) {
-  const base = Math.round(Number(baselineRaw) || 0);
-  const peak = Math.round(Number(peakRaw) || 0);
-  return `ADC base ${base} · peak +${peak} ${unit}`;
+/* Raw sensor output in millivolts, the same scaling the CSV and livemon use:
+   alcohol nA through the 4k transimpedance resistor, PID codes by LSB size.
+   Peak of the breath, baseline included, so it is the sensor's actual reading
+   rather than anything derived from the calibration constants. */
+const NA_TO_MV = 4 / 1000;        // 1 uA = 4 mV across Rtia
+const CODE_TO_MV = 2.5 / (2 * 65536) * 1000;   // 0.019073 mV per LSB
+
+function rawMv(baselineRaw, peakRaw, scale) {
+  const absolute = (Number(baselineRaw) || 0) + (Number(peakRaw) || 0);
+  return `${(absolute * scale).toFixed(2)} mV`;
 }
 
 function showResults(result) {
@@ -414,9 +417,9 @@ function showResults(result) {
   $("#val-alcohol").textContent = fmtBac(result);
   $("#val-cannabis").textContent = fmtConfidence(result);
   $("#raw-alcohol").textContent =
-    rawLine(result.alcohol_baseline_raw, result.alcohol_peak_raw, "nA");
+    rawMv(result.alcohol_baseline_raw, result.alcohol_peak_raw, NA_TO_MV);
   $("#raw-cannabis").textContent =
-    rawLine(result.cannabis_baseline_raw, result.cannabis_peak_raw, "codes");
+    rawMv(result.cannabis_baseline_raw, result.cannabis_peak_raw, CODE_TO_MV);
   sndPass();
   if (result.baseline_stable === false) toast("BASELINE UNSTABLE — RESULT SUSPECT", true);
 }
