@@ -71,17 +71,31 @@ done
 # the logs. Firefox works there, so fall back to it rather than leaving a
 # blank kiosk. Chromium stays the default where it runs — it starts faster
 # and honours --use-fake-ui-for-media-stream for the exhale photo.
+# How large everything on screen is drawn. 1.0 is the panel's native size;
+# 1.25 makes it a quarter bigger. This is a zoom of the whole UI, not a font
+# size, so the layout keeps its proportions -- the CSS is already sized in
+# viewport units. Set HH_UI_SCALE in /etc/breathcheck.env.
+UI_SCALE="${HH_UI_SCALE:-1.0}"
+
 start_firefox() {
   if [[ -z $FIREFOX ]]; then
     echo "No usable browser found — open $URL manually" >&2
     exit 1
   fi
-  echo "starting $FIREFOX in kiosk mode"
+  # Firefox has no scale flag, so the pref goes in a profile we own. A
+  # dedicated profile also means no stale .parentlock from an unrelated
+  # Firefox window can stop the kiosk starting.
+  local profile="${HOME}/.breathcheck-firefox"
+  mkdir -p "$profile"
+  printf 'user_pref("layout.css.devPixelsPerPx", "%s");\n' "$UI_SCALE" \
+    > "$profile/user.js"
+  rm -f "$profile/.parentlock" "$profile/lock"
+  echo "starting $FIREFOX in kiosk mode (scale $UI_SCALE)"
   # -private-window is Firefox's equivalent of Chromium's --incognito below:
   # without it the frontend is cached across restarts, so a code update looks
   # like it did nothing and the usual response is to reboot, which does not
   # help either.
-  exec "$FIREFOX" --kiosk -private-window "$URL"
+  exec "$FIREFOX" --kiosk -private-window -profile "$profile" "$URL"
 }
 
 if [[ -z $CHROMIUM ]]; then
@@ -96,10 +110,11 @@ fi
 # can't satisfy Chromium's hardware buffer allocation (gbm_wrapper
 # "Failed to export buffer to dma_buf" errors) — render in software instead,
 # which is plenty fast for this plain HTML/CSS kiosk UI.
-echo "starting $CHROMIUM in kiosk mode"
+echo "starting $CHROMIUM in kiosk mode (scale $UI_SCALE)"
 started=$SECONDS
 "$CHROMIUM" \
   --kiosk "$URL" \
+  --force-device-scale-factor="$UI_SCALE" \
   --incognito \
   --noerrdialogs \
   --disable-infobars \
