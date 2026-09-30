@@ -27,7 +27,11 @@ echo "==> Restarting the backend"
 sudo systemctl restart breathcheck
 
 echo "==> Reloading the kiosk"
-if [[ -n ${DISPLAY:-} ]] || pgrep -x Xorg >/dev/null 2>&1; then
+# An X server always leaves a socket in /tmp/.X11-unix, whatever the binary is
+# called -- pgrep -x Xorg misses X, Xwayland and vendor-renamed builds, so over
+# SSH this said "no X session" on a device that plainly had one on screen.
+if [[ -n ${DISPLAY:-} ]] || pgrep -x Xorg >/dev/null 2>&1 \
+   || compgen -G '/tmp/.X11-unix/X*' >/dev/null 2>&1; then
   export DISPLAY="${DISPLAY:-:0}"
   export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
   pkill -f 'chromium|chromium-browser|google-chrome|firefox' 2>/dev/null || true
