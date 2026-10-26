@@ -85,7 +85,11 @@ DEMO_FORCE_CLEAN = _str("HH_DEMO_FORCE_CLEAN", "0").lower() in {"1", "true", "ye
 # Discard queued board records at the start of a cycle before anchoring the
 # clock, so a sample taken while idle cannot shift the phase boundaries.
 CYCLE_FLUSH_SECONDS = _float("HH_CYCLE_FLUSH_SECONDS", 0.25)
-PURGE_SECONDS = _float("HH_PURGE_SECONDS", 1.0)        # pump on, discard
+# The alcohol AFE runs a zero-offset calibration when it powers up at the
+# start of a cycle. If the baseline window opens before it emits its first
+# sample, that channel has no zero and the scan reports nothing -- so the
+# purge has to outlast the AFE's startup.
+PURGE_SECONDS = _float("HH_PURGE_SECONDS", 3.0)        # pump on, discard
 BASELINE_SECONDS = _float("HH_BASELINE_SECONDS", 4.0)  # fresh-air zero
 RECOVERY_SECONDS = _float("HH_RECOVERY_SECONDS", 5.0)  # falling edge after the blow
 

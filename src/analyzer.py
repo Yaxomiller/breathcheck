@@ -112,6 +112,14 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
+# A drift slope is only trusted when the baseline window actually supports one.
+MIN_FIT_SAMPLES = 6
+MIN_FIT_SPAN_MS = 2000.0
+
+# Below this many samples a constant reading is not yet evidence of a freeze.
+FROZEN_MIN_SAMPLES = 20
+
+
 def _fit_line(points: list[tuple[int, float]]) -> tuple[float, float]:
     """Least-squares (intercept, slope-per-ms) through the baseline samples.
 
@@ -124,6 +132,13 @@ def _fit_line(points: list[tuple[int, float]]) -> tuple[float, float]:
         return (points[0][1] if n else 0.0), 0.0
     mean_t = sum(t for t, _v in points) / n
     mean_v = sum(v for _t, v in points) / n
+    # A slope fitted through few points over a short span is mostly noise, and
+    # it gets projected across the whole measure window -- a wrong slope there
+    # subtracts more than the real response and reports a live breath as zero.
+    # Too little to fit confidently: stay flat at the mean.
+    span_ms = max(t for t, _v in points) - min(t for t, _v in points)
+    if n < MIN_FIT_SAMPLES or span_ms < MIN_FIT_SPAN_MS:
+        return mean_v, 0.0
     denominator = sum((t - mean_t) ** 2 for t, _v in points)
     if denominator <= 0:
         return mean_v, 0.0
@@ -699,6 +714,21 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                                 phase = "recovery"
                                 elapsed = (dt - blow_end_ms) / 1000.0
                                 total = recovery_ms / 1000.0
+                            if channel["baseline"] is None and not channel["base"]:
+                                # No fresh-air samples arrived at all -- the AFE
+                                # was still running its zero-offset calibration
+                                # through the whole baseline window. Without
+                                # this fallback the channel would never
+                                # integrate and the scan would silently report
+                                # 0.000 while the sensor was plainly responding.
+                                logger.warning(
+                                    "source %d produced no baseline samples; "
+                                    "using the first measured sample as the zero",
+                                    source)
+                                channel["baseline"] = value
+                                channel["fit"] = (value, 0.0)
+                                channel["stable"] = False
+                                channel["fallback"] = True
                             if channel["baseline"] is None and channel["base"]:
                                 values = [v for _t, v in channel["base"]]
                                 channel["baseline"] = sum(values) / float(len(values))
@@ -906,7 +936,31 @@ class SpiBreathAnalyzer(BreathAnalyzer):
                 except Exception:
                     pass
 
+    @staticmethod
+    def _assert_channel_live(source: int, data: dict) -> None:
+        """Refuse a channel whose ADC stopped changing.
+
+        A frozen AFE repeats its last value forever. Every delta against it is
+        then exactly zero, the integral is zero, and the scan reports a clean
+        breath -- a hardware fault wearing the costume of a sober result. Real
+        converters always jitter by at least an LSB, so no variation at all
+        across a whole cycle means the sensor is not reporting, and the only
+        safe thing to do is fail the test rather than print 0.000.
+        """
+        values = [value for _t, value, _d, _mv in data["samples"]]
+        if len(values) < FROZEN_MIN_SAMPLES:
+            return
+        if max(values) - min(values) > 0.0:
+            return
+        name = {SRC_AD5941: "alcohol", SRC_AD7798: "cannabis"}.get(source, str(source))
+        raise RuntimeError(
+            f"{name} sensor stopped responding (frozen at {values[0]:.0f} for "
+            f"{len(values)} samples) - no reading taken")
+
     def _build_result(self, stats: dict, blow_start_epoch: float = 0.0) -> CycleResult:
+        for source in (SRC_AD5941, SRC_AD7798):
+            self._assert_channel_live(source, stats[source])
+
         def channel(source: int) -> ChannelResult:
             data = stats[source]
             baseline = data["baseline"] if data["baseline"] is not None else 0.0
