@@ -123,7 +123,13 @@ RTIA_KOHM = _float("HH_RTIA_KOHM", 4.0)   # AD5941 LPTIA Rtia (LPTIARTIA_4K)
 # threshold splits the area under it into an upper section (the part of the
 # curve poking above the line) and a lower section (the part beneath it).
 # The reported ratio is upper / lower.
-CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 500.0)
+#
+# This line MUST sit inside the signal. A real PID response here peaks around
+# 15 mV, and the ADC's whole range is 1250 mV -- a line at 500 mV is never
+# crossed, so upper is always 0 and every breath scores 0.000 no matter how
+# the voltage behaves. 0.4 mV is well above the ~0.04 mV noise floor and is
+# what the sibling attendance app uses.
+CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 0.4)
 
 # Project the baseline's own drift across the measure window and subtract it,
 # instead of holding the baseline flat at its mean. A sensor that is still
@@ -133,8 +139,13 @@ CANNABIS_THRESHOLD_MV = _float("HH_CANNABIS_THRESHOLD_MV", 500.0)
 DRIFT_CORRECTION = _str("HH_DRIFT_CORRECTION", "1").lower() not in {"0", "false", "no", "off"}
 
 # --- Reported figures -------------------------------------------------------
-# Cannabis is reported as a CONFIDENCE SCORE from 0 to 1: the upper/lower area
-# ratio itself, clamped. No divisor, no gain.
+# Cannabis is reported as a CONFIDENCE SCORE from 0 to 1. The upper/lower area
+# ratio is unbounded -- with the line low in the curve it runs into the tens or
+# hundreds -- so it is divided by the ratio a definite positive produces, then
+# clamped. CALIBRATE THIS: run a known positive, read its cannabis_ratio from
+# the record, and set HH_CANNABIS_CONFIDENCE_THRESHOLD to that number. Until
+# then the default is inherited from the attendance app and is a guess.
+CANNABIS_CONFIDENCE_THRESHOLD = _float("HH_CANNABIS_CONFIDENCE_THRESHOLD", 500.0)
 
 # Alcohol is reported as %BAC from a straight line through two calibration
 # points: the reading that means sober, and a reading of known concentration.
@@ -146,10 +157,12 @@ BAC_REF_PERCENT = _float("HH_BAC_REF_PERCENT", 0.2)
 def confidence_score(ul_ratio: float) -> float:
     """Cannabis upper/lower area ratio -> confidence between 0 and 1.
 
-    The ratio IS the score: 0.62 reports as 0.620. Clamped at both ends, so
-    more area above the line than below reports exactly 1.000.
+    Normalised against the ratio a definite positive gives, then clamped, so
+    a ratio at or above that threshold reports 1.000.
     """
-    return max(0.0, min(1.0, float(ul_ratio)))
+    if CANNABIS_CONFIDENCE_THRESHOLD <= 0:
+        return 0.0
+    return max(0.0, min(1.0, float(ul_ratio) / CANNABIS_CONFIDENCE_THRESHOLD))
 
 
 def bac_percent(reading: float) -> float:
